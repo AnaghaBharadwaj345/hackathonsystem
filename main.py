@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
@@ -68,7 +68,7 @@ def config() -> Dict[str, Any]:
              "description": "Urgency only. No aging, so low-acuity patients can starve."},
             {"key": "medflow", "label": engine.POLICY_LABELS["medflow"],
              "description": "Three-tier priority with deadline guarantee, atomic bundle "
-                            "acquisition, and reservation with backfill."},
+                             "acquisition, and reservation with backfill."},
         ],
         "resources": [
             {"key": k, "label": label, "default_capacity": cap}
@@ -155,9 +155,10 @@ def reset(run_id: str) -> Dict[str, Any]:
 
 
 @app.delete("/api/runs/{run_id}", status_code=204, tags=["runs"])
-def delete_run(run_id: str) -> None:
+def delete_run(run_id: str) -> Response:
     if not store.delete(run_id):
         raise HTTPException(status_code=404, detail=f"No run {run_id}")
+    return Response(status_code=204)
 
 
 @app.get("/api/runs/{run_id}/metrics", tags=["runs"])
