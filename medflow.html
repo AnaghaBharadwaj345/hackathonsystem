@@ -217,6 +217,8 @@ td.best{color:var(--ok);font-weight:600}
     <button class="btn btn-primary" id="playBtn">Start</button>
     <button class="btn" id="resetBtn">Reset</button>
     <div class="seg" role="group" aria-label="Speed">
+      <button data-speed="0.25" aria-pressed="true">0.5×</button>
+      <button data-speed="0.5" aria-pressed="true">0.5×</button>
       <button data-speed="1" aria-pressed="true">1×</button>
       <button data-speed="6" aria-pressed="false">6×</button>
       <button data-speed="30" aria-pressed="false">30×</button>
@@ -671,8 +673,8 @@ class Sim {
 
 /* ============================ UI ============================ */
 const $ = s => document.querySelector(s);
-let sim, timer=null, speed=1, policy="medflow", running=false;
-
+let sim, timer=null, speed=0.25, policy="medflow", running=false;
+let speedAccumulator=0;
 function build(){
   const seed = Math.max(1, parseInt($("#seedInput").value)||1);
   const load = Math.max(30, parseInt($("#loadInput").value)||100);
@@ -811,9 +813,23 @@ function drawChart(){
 /* ---------- loop ---------- */
 function tick(){
   if(!running) return;
-  for(let i=0;i<speed && sim.t<HORIZON;i++) sim.step();
+
+  speedAccumulator += speed;
+
+  while (speedAccumulator >= 1 && sim.t < HORIZON) {
+    sim.step();
+    speedAccumulator -= 1;
+  }
+
   render();
-  if(sim.t>=HORIZON){ running=false; $("#playBtn").textContent="Day complete"; $("#playBtn").disabled=true; return; }
+
+  if(sim.t >= HORIZON){
+    running = false;
+    $("#playBtn").textContent = "Day complete";
+    $("#playBtn").disabled = true;
+    return;
+  }
+
   timer = requestAnimationFrame(tick);
 }
 
