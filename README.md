@@ -1,3 +1,5 @@
+Link of simulator: file:///C:/Users/chinn/Documents/hackathonsystem/medflow.html
+
 MEDFLOW simulates the flow of patients through an emergency department where resources such as ICU beds, ward beds, doctors, nurses, operating rooms, and ambulances are limited.
 
 The main problem is deciding which patient should be treated next when several patients are waiting and resources are unavailable.
@@ -287,3 +289,69 @@ ICU overflow behavior
 If an ICU bed is unavailable, a patient who needs ICU care may temporarily be boarded in a ward bed, while retaining the required staffing. This is tracked as a boarded patient and contributes to ICU-blocked time.
 
 
+How to launch the project
+Option 1: Open the frontend directly
+If the project contains a standalone HTML frontend, open the main HTML file in a browser.
+
+For example:
+
+Text
+medflow.html
+You can double-click the file or right-click it and choose Open with Browser.
+
+Option 2: Run using a local web server
+For a more reliable launch, start a local web server from the project directory:
+
+bash
+python -m http.server 8000
+Then open:
+
+Text
+http://localhost:8000
+If the frontend is located in another directory, run the command from that directory:
+
+bash
+cd path/to/frontend
+python -m http.server 8000
+Option 3: Use VS Code Live Server
+Open the project in Visual Studio Code.
+Install the Live Server extension.
+Open the main HTML file.
+Right-click the file.
+Select Open with Live Server.
+The project will open in the browser automatically.
+
+How to use the simulator
+Open the simulator in your browser.
+Select a scheduling policy.
+Set the patient load and available hospital capacity.
+Choose a random seed if available.
+Start or reset the simulation.
+Advance the simulation using the time controls.
+Observe:
+Patient queue
+Resource usage
+Treated patients
+Waiting times
+Walkouts
+Adverse events
+Overall performance metrics
+Use the surge or mass-casualty option to test the system under extreme demand.
+Compare the policies to identify which approach performs best.
+Running tests
+If the repository includes Python tests, install the dependencies first:
+
+bash
+pip install -r requirements.txt
+Then run:
+
+bash
+pytest -q
+The tests verify simulation behavior such as:
+
+Hospital capacity is not exceeded
+Resources are not assigned to multiple patients at the same time
+Patients are not lost during the simulation
+Scheduling deadlines are respected
+Results are deterministic for the same seed
+Different policies can be compared consistently
