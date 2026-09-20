@@ -16,15 +16,31 @@ from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import sim as engine
-from .schemas import (AdvanceIn, BenchmarkIn, RunCreate, SurgeIn, WhatIfIn)
+from .db import (
+    add_admission,
+    add_history,
+    create_patient,
+    get_patient,
+    init_db,
+    list_patients,
+)
+from .schemas import (
+    AdmissionCreate,
+    AdvanceIn,
+    BenchmarkIn,
+    HistoryCreate,
+    PatientCreate,
+    RunCreate,
+    SurgeIn,
+    WhatIfIn,
+)
 from .store import store
 
 app = FastAPI(
     title="MEDFLOW API",
     version="1.0.0",
     description=(
-        "Hospital resource allocation simulator. Create a run, advance it, and "
-        "compare scheduling policies over identical patient arrivals."
+        "Hospital resource allocation simulator with persistent patient records."
     ),
 )
 
@@ -36,6 +52,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+def startup() -> None:
+    """Create the SQLite database and tables when the API starts."""
+    init_db()
 
 
 def _capacity(payload) -> Dict[str, int] | None:
@@ -67,8 +89,7 @@ def config() -> Dict[str, Any]:
             {"key": "triage", "label": engine.POLICY_LABELS["triage"],
              "description": "Urgency only. No aging, so low-acuity patients can starve."},
             {"key": "medflow", "label": engine.POLICY_LABELS["medflow"],
-             "description": "Three-tier priority with deadline guarantee, atomic bundle "
-                            "acquisition, and reservation with backfill."},
+             "description": "Three-tier priority with deadline guarantee, atomic bundle acquisition, and reservation with backfill."},
         ],
         "resources": [
             {"key": k, "label": label, "default_capacity": cap}
@@ -86,6 +107,52 @@ def config() -> Dict[str, Any]:
         "horizon_min": engine.HORIZON,
         "day_starts_at": "06:00",
     }
+
+
+# --------------------------------------------------------------------------
+# patients and medical records
+# --------------------------------------------------------------------------
+@app.post("/api/patients", status_code=201, tags=["patients"])
+def create_patient_route(payload: PatientCreate) -> Dict[str, Any]:
+    return create_patient(payload.model_dump(exclude_none=True))
+
+
+@app.get("/api/patients", tags=["patients"])
+def get_patients(limit: int = Query(100, ge=1, le=500)) -> Dict[str, Any]:
+    return {"patients": list_patients(limit)}
+
+
+@app.get("/api/patients/{patient_id}", tags=["patients"])
+def get_patient_route(patient_id: str) -> Dict[str, Any]:
+    patient = get_patient(patient_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return patient
+
+
+@app.post("/api/patients/{patient_id}/history", tags=["patients"])
+def add_history_route(
+    patient_id: str,
+    payload: HistoryCreate,
+) -> Dict[str, Any]:
+    if get_patient(patient_id) is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return add_history(patient_id, payload.condition, payload.notes)
+
+
+@app.post("/api/patients/{patient_id}/admissions", tags=["patients"])
+def add_admission_route(
+    patient_id: str,
+    payload: AdmissionCreate,
+) -> Dict[str, Any]:
+    if get_patient(patient_id) is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    admission_data = payload.model_dump(exclude_none=True)
+    admission_data["patient_id"] = patient_id
+    try:
+        return add_admission(admission_data)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Patient not found")
 
 
 # --------------------------------------------------------------------------
@@ -111,9 +178,11 @@ def list_runs() -> Dict[str, Any]:
 
 
 @app.get("/api/runs/{run_id}", tags=["runs"])
-def get_run(run_id: str,
-            queue_limit: int = Query(25, ge=1, le=200),
-            log_limit: int = Query(40, ge=0, le=400)) -> Dict[str, Any]:
+def get_run(
+    run_id: str,
+    queue_limit: int = Query(25, ge=1, le=200),
+    log_limit: int = Query(40, ge=0, le=400),
+) -> Dict[str, Any]:
     h = _handle(run_id)
     with h.lock:
         return {"run_id": run_id, "snapshot": h.sim.snapshot(queue_limit, log_limit)}
@@ -150,7 +219,7 @@ def reset(run_id: str) -> Dict[str, Any]:
     with h.lock:
         old = h.sim
         h.sim = engine.Sim(old.seed, old.policy, round(old.load * 100),
-                           old.capacity, old.horizon)
+                            old.capacity, old.horizon)
         return {"run_id": run_id, "snapshot": h.sim.snapshot()}
 
 
@@ -186,13 +255,7 @@ def patients_csv(run_id: str) -> PlainTextResponse:
 # --------------------------------------------------------------------------
 @app.post("/api/benchmark", tags=["analysis"])
 async def benchmark(payload: BenchmarkIn) -> Dict[str, Any]:
-    """
-    Run every policy over the same seeds and return a comparison table.
-
-    This is the honest version of the claim: arrivals come from a separate
-    random stream, so each policy faces the identical patient sequence and the
-    only difference is the ordering decision.
-    """
+    """Run every policy over the same seeds and return a comparison table."""
     return await run_in_threadpool(
         engine.compare_policies,
         payload.seed, payload.load_pct, payload.policies,
@@ -202,10 +265,7 @@ async def benchmark(payload: BenchmarkIn) -> Dict[str, Any]:
 
 @app.post("/api/what-if", tags=["analysis"])
 async def what_if(payload: WhatIfIn) -> Dict[str, Any]:
-    """
-    Price a staffing decision. Adds one unit of each resource in turn, re-runs
-    the same seeds, and ranks the options by reduction in harm and abandonment.
-    """
+    """Price a staffing decision by adding one unit of each resource in turn."""
     deltas: List[Dict[str, int]] | None = (
         [d.model_dump() for d in payload.deltas] if payload.deltas else None
     )
@@ -220,14 +280,13 @@ async def what_if(payload: WhatIfIn) -> Dict[str, Any]:
 # live feed
 # --------------------------------------------------------------------------
 @app.websocket("/ws/runs/{run_id}")
-async def live(websocket: WebSocket, run_id: str,
-               speed: int = Query(30, ge=1, le=600),
-               interval_ms: int = Query(100, ge=40, le=2000)) -> None:
-    """
-    Streams a snapshot every interval, advancing `speed` simulated minutes each
-    time. Send {"action":"pause"}, {"action":"resume"}, {"action":"surge","count":8}
-    or {"action":"speed","value":60} to control it.
-    """
+async def live(
+    websocket: WebSocket,
+    run_id: str,
+    speed: int = Query(30, ge=1, le=600),
+    interval_ms: int = Query(100, ge=40, le=2000),
+) -> None:
+    """Stream snapshots while advancing a simulation."""
     await websocket.accept()
     h = store.get(run_id)
     if h is None:
