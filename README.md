@@ -13,7 +13,7 @@ app/
   schemas.py   request and response models
   store.py     in-memory run registry with locking and TTL eviction
   main.py      FastAPI app: REST endpoints and the live WebSocket feed
-tests/         40 tests: invariants, determinism, golden values, API, parity
+tests/         invariant, determinism, parity and API checks
 ```
 
 ## Run it
@@ -158,7 +158,7 @@ averaged over ten seeds:
   than first-come; neither is meaningfully better than the other.
 - It pays for the walkout reduction with somewhat longer average waits for
   level 2 and 3 patients, because capacity that strict triage would have given
-  them now goes to overdue patients instead.
+them now goes to overdue patients instead.
 
 Push `load_pct` high enough and all three policies fail together. No scheduler
 manufactures staff who are not on shift, which is the point of `/api/what-if`.
@@ -184,10 +184,18 @@ is sound: capacity is never exceeded, no resource unit is ever double-booked,
 no patient vanishes, and the deadline ordering rule is asserted directly rather
 than inferred from averages.
 
-## Notes for production
+## Runtime flow
 
-Runs live in process memory. The store is deliberately a single class with a
-narrow interface, so moving to Redis or Postgres means rewriting `store.py` and
-nothing else. CORS is wide open for local development and should be narrowed.
-Long benchmarks already run in a thread pool; if they grow, move them to a task
-queue and return a job id rather than blocking the request.
+The actual usage flow is:
+
+1. User opens the frontend or calls the API.
+2. A new simulation run is created.
+3. Patients arrive based on the chosen seed and load level.
+4. The policy decides who gets served next.
+5. Resources are checked and assigned as a bundle.
+6. The simulation steps forward in time.
+7. Metrics are computed and returned.
+8. The user can reset, surge, benchmark, or compare resource scenarios.
+
+This is the core execution path of the project: patient arrival → policy
+selection → resource allocation → simulation advance → metrics and visibility.
