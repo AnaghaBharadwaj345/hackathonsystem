@@ -1,4 +1,4 @@
-Link of simulator: file:///C:/Users/chinn/Documents/hackathonsystem/medflow.html
+
 
 MEDFLOW simulates the flow of patients through an emergency department where resources such as ICU beds, ward beds, doctors, nurses, operating rooms, and ambulances are limited.
 
