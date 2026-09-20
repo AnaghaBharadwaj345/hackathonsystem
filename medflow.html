@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MEDFLOW — Hospital Resource Management Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#10161d;
+  --panel:#18212b;
+  --panel-2:#1e2935;
+  --line:#2a3745;
+  --line-soft:#212d3a;
+  --text:#e4ecf2;
+  --text-2:#93a5b5;
+  --text-3:#68798a;
+  --accent:#3fa9c9;
+  --accent-ink:#06222c;
+  --esi1:#e5484d;
+  --esi2:#ef7f2e;
+  --esi3:#dcc04a;
+  --esi4:#48a562;
+  --esi5:#5a8fc7;
+  --ok:#48a562;
+  --warn:#ef7f2e;
+  --bad:#e5484d;
+  --free:#23303d;
+  --radius:3px;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  font-feature-settings:"tnum" 1,"cv05" 1;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#eef1f4;
+    --panel:#ffffff;
+    --panel-2:#f6f8fa;
+    --line:#d7dee5;
+    --line-soft:#e6ebef;
+    --text:#152029;
+    --text-2:#566775;
+    --text-3:#7d8d9a;
+    --accent:#1b7f9e;
+    --accent-ink:#ffffff;
+    --free:#e4e9ee;
+    --esi3:#b99a12;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#eef1f4; --panel:#ffffff; --panel-2:#f6f8fa; --line:#d7dee5; --line-soft:#e6ebef;
+  --text:#152029; --text-2:#566775; --text-3:#7d8d9a; --accent:#1b7f9e; --accent-ink:#ffffff;
+  --free:#e4e9ee; --esi3:#b99a12;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0;min-height:100%;background:var(--bg);color:var(--text);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:"IBM Plex Sans Condensed","IBM Plex Sans",system-ui,sans-serif;font-weight:600;margin:0;letter-spacing:.01em}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- shell ---------- */
+.wrap{max-width:1360px;margin:0 auto;padding:0 14px 56px}
+
+.masthead{
+  display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;
+  padding:22px 0 14px;border-bottom:1px solid var(--line);
+}
+.brand h1{font-size:clamp(26px,4.2vw,38px);line-height:1;letter-spacing:.06em}
+.brand p{margin:6px 0 0;color:var(--text-2);max-width:62ch;font-size:13.5px}
+.clockbox{display:flex;align-items:baseline;gap:10px}
+.clock{font-family:"IBM Plex Sans Condensed",sans-serif;font-size:clamp(30px,6vw,44px);font-weight:600;line-height:1;letter-spacing:.02em}
+.clock-meta{color:var(--text-2);font-size:12.5px;text-align:left}
+
+/* ---------- controls ---------- */
+.console{
+  display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+  padding:12px 0;border-bottom:1px solid var(--line);
+}
+.btn{
+  background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:7px 14px;cursor:pointer;font-weight:500;transition:background .12s,border-color .12s;
+}
+.btn:hover{border-color:var(--accent)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn-primary:hover{filter:brightness(1.08)}
+.seg{display:flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.seg button{background:var(--panel-2);border:0;padding:7px 11px;cursor:pointer;color:var(--text-2)}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+.field{display:flex;align-items:center;gap:7px;color:var(--text-2);font-size:12.5px}
+.field input[type=number],.field input[type=text]{
+  width:74px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:6px 8px;
+}
+.spacer{flex:1 1 auto}
+
+/* ---------- layout ---------- */
+.grid{display:grid;gap:14px;grid-template-columns:1fr;margin-top:14px}
+@media (min-width:1000px){ .grid{grid-template-columns:minmax(0,1.32fr) minmax(0,1fr)} }
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.panel-head{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:10px 13px;border-bottom:1px solid var(--line);background:var(--panel-2);
+}
+.panel-head h2{font-size:16px}
+.panel-head .note{color:var(--text-3);font-size:12px}
+.panel-body{padding:13px}
+
+/* ---------- capacity board ---------- */
+.res-row{padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.res-row:last-child{border-bottom:0;padding-bottom:2px}
+.res-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}
+.res-name{font-family:"IBM Plex Sans Condensed",sans-serif;font-size:15px;font-weight:600}
+.res-num{color:var(--text-2);font-size:12.5px}
+.res-num b{color:var(--text);font-weight:600}
+.tiles{display:flex;flex-wrap:wrap;gap:3px}
+.tile{
+  width:19px;height:23px;border-radius:2px;background:var(--free);
+  border:1px solid transparent;transition:background .2s;position:relative;
+}
+.tile[data-esi="1"]{background:var(--esi1)}
+.tile[data-esi="2"]{background:var(--esi2)}
+.tile[data-esi="3"]{background:var(--esi3)}
+.tile[data-esi="4"]{background:var(--esi4)}
+.tile[data-esi="5"]{background:var(--esi5)}
+.tile.blocked{border-color:var(--bad);box-shadow:inset 0 0 0 2px var(--bg)}
+.meter{height:7px;background:var(--free);border-radius:2px;overflow:hidden}
+.meter span{display:block;height:100%;background:var(--accent);transition:width .25s}
+.meter.hot span{background:var(--warn)}
+.meter.crit span{background:var(--bad)}
+
+/* ---------- queue ---------- */
+.queue{max-height:360px;overflow:auto}
+.qrow{
+  display:grid;grid-template-columns:30px 1fr auto;gap:9px;align-items:center;
+  padding:8px 13px;border-bottom:1px solid var(--line-soft);
+}
+.qrow:last-child{border-bottom:0}
+.badge{
+  width:30px;height:30px;border-radius:2px;display:grid;place-items:center;
+  font-weight:600;font-size:14px;color:#0d1219;
+}
+.badge[data-esi="1"]{background:var(--esi1);color:#fff}
+.badge[data-esi="2"]{background:var(--esi2)}
+.badge[data-esi="3"]{background:var(--esi3)}
+.badge[data-esi="4"]{background:var(--esi4);color:#fff}
+.badge[data-esi="5"]{background:var(--esi5);color:#fff}
+.qname{font-weight:500}
+.qmeta{color:var(--text-3);font-size:12px}
+.qmeta .need{color:var(--text-2)}
+.qscore{text-align:right;font-weight:600;font-size:15px}
+.qscore small{display:block;font-weight:400;font-size:11px;color:var(--text-3)}
+.qrow.held{background:color-mix(in srgb,var(--bad) 9%,transparent)}
+.qrow.backfill{background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.empty{padding:26px 13px;color:var(--text-3);text-align:center}
+
+/* ---------- kpis ---------- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:1px;background:var(--line-soft)}
+.kpi{background:var(--panel);padding:11px 12px}
+.kpi .v{font-family:"IBM Plex Sans Condensed",sans-serif;font-size:25px;font-weight:600;line-height:1.1}
+.kpi .l{color:var(--text-3);font-size:11.5px;margin-top:2px}
+.kpi .v.good{color:var(--ok)} .kpi .v.warn{color:var(--warn)} .kpi .v.bad{color:var(--bad)}
+
+canvas{display:block;width:100%;height:140px}
+
+/* ---------- log ---------- */
+.log{height:172px;overflow:auto;font-size:12.5px}
+.logrow{display:flex;gap:9px;padding:4px 13px;border-bottom:1px solid var(--line-soft);color:var(--text-2)}
+.logrow time{color:var(--text-3);flex:0 0 46px}
+.logrow.alert{color:var(--bad)}
+.logrow.good{color:var(--ok)}
+
+/* ---------- benchmark ---------- */
+.bench{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:620px;font-size:13px}
+th,td{padding:9px 11px;text-align:right;border-bottom:1px solid var(--line-soft)}
+th:first-child,td:first-child{text-align:left}
+thead th{color:var(--text-3);font-weight:500;font-size:12px;border-bottom:1px solid var(--line)}
+tbody tr.win{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+td.best{color:var(--ok);font-weight:600}
+.policy-name{font-weight:600}
+.policy-name small{display:block;font-weight:400;color:var(--text-3);font-size:11.5px;max-width:34ch}
+
+.legend{display:flex;flex-wrap:wrap;gap:12px;padding:9px 13px;border-top:1px solid var(--line);color:var(--text-3);font-size:12px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+.footnote{margin-top:26px;padding-top:16px;border-top:1px solid var(--line);color:var(--text-3);font-size:12.5px;max-width:78ch}
+.footnote b{color:var(--text-2);font-weight:600}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="brand">
+      <h1>MEDFLOW</h1>
+      <p>A hospital resource allocation simulator. Patients arrive with different urgency and different resource needs; beds, theatres and staff are finite. The scheduler decides who goes next.</p>
+    </div>
+    <div class="clockbox">
+      <div>
+        <div class="clock" id="clock">06:00</div>
+        <div class="clock-meta" id="clockMeta">Day 1 · not started</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="console">
+    <button class="btn btn-primary" id="playBtn">Start</button>
+    <button class="btn" id="resetBtn">Reset</button>
+    <div class="seg" role="group" aria-label="Speed">
+      <button data-speed="1" aria-pressed="false">1×</button>
+      <button data-speed="6" aria-pressed="true">6×</button>
+      <button data-speed="30" aria-pressed="false">30×</button>
+      <button data-speed="120" aria-pressed="false">120×</button>
+    </div>
+    <div class="seg" role="group" aria-label="Allocation policy">
+      <button data-policy="fifo" aria-pressed="false">First come</button>
+      <button data-policy="triage" aria-pressed="false">Strict triage</button>
+      <button data-policy="medflow" aria-pressed="true">MEDFLOW</button>
+    </div>
+    <label class="field">Seed <input type="number" id="seedInput" value="4207" min="1" step="1"></label>
+    <label class="field">Load <input type="number" id="loadInput" value="100" min="30" max="260" step="10">%</label>
+    <div class="spacer"></div>
+    <button class="btn" id="surgeBtn">Trigger mass casualty</button>
+    <button class="btn" id="themeBtn" title="Toggle light/dark">Theme</button>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT COLUMN -->
+    <div style="display:grid;gap:14px;align-content:start">
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Capacity board</h2>
+          <span class="note" id="capNote">Each tile is one unit. Colour shows the patient's triage level.</span>
+        </div>
+        <div class="panel-body" id="board"></div>
+        <div class="legend">
+          <span><i style="background:var(--esi1)"></i>1 Resuscitation</span>
+          <span><i style="background:var(--esi2)"></i>2 Emergent</span>
+          <span><i style="background:var(--esi3)"></i>3 Urgent</span>
+          <span><i style="background:var(--esi4)"></i>4 Less urgent</span>
+          <span><i style="background:var(--esi5)"></i>5 Non-urgent</span>
+          <span><i style="background:var(--free);box-shadow:inset 0 0 0 1px var(--bad)"></i>Bed blocked by step-down</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Waiting, in priority order</h2>
+          <span class="note" id="queueNote">—</span>
+        </div>
+        <div class="queue" id="queue"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Event log</h2></div>
+        <div class="log" id="log"></div>
+      </section>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div style="display:grid;gap:14px;align-content:start">
+      <section class="panel">
+        <div class="panel-head"><h2>Live outcomes</h2><span class="note" id="kpiNote">since start of run</span></div>
+        <div class="kpis" id="kpis"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Queue depth and wait</h2><span class="note">rolling, last 8 hours</span></div>
+        <div class="panel-body" style="padding:9px 9px 4px"><canvas id="chart" height="140"></canvas></div>
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>People waiting</span>
+          <span><i style="background:var(--warn)"></i>Average wait (min)</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Policy comparison</h2>
+          <button class="btn" id="benchBtn">Run all three</button>
+        </div>
+        <div class="panel-body" style="padding:0">
+          <div class="bench" id="bench">
+            <p class="empty">Runs a full 24-hour day through each policy on the same seed, so the only thing that changes is the scheduling decision.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <p class="footnote">
+    <b>What the MEDFLOW scheduler does.</b> Every simulated minute it re-sorts everyone waiting into three tiers. Resuscitation and emergent cases sit above everything and are never deferred. Below them, anyone past their hard clinical deadline is served most-overdue-first — that is the starvation guarantee, and it is why level 4 and 5 patients stop walking out. Everyone else is ranked by acuity stretched by how far past target they have waited and by modelled deterioration risk. Resources are then acquired as whole bundles, atomically: a patient is admitted only when the bed, the clinician and the nurses are free at the same instant, which removes hold-and-wait and makes deadlock impossible. When the top patient still cannot be placed, the resource they are short of is reserved instead of being handed down the queue, and someone lower is backfilled into it only if they will be finished before the reservation comes due. A critical patient who needs intensive care and finds no ICU bed is boarded in a ward bed rather than left waiting.
+    <br><br>
+    <b>Why the comparison is fair.</b> Arrivals run on a separate random stream from in-hospital events, so all three policies face the identical patient sequence on a given seed and the only difference is the ordering decision. Waiting times include people who left without being seen, otherwise a policy that abandons its long waiters would look artificially fast.
+    <br><br>
+    <b>Read the trade-off honestly.</b> MEDFLOW does not win every column. Against strict triage it treats more people, roughly halves walkouts and cuts avoidable deterioration, and it pays for that with slightly longer average waits for level 2 and 3 patients, because overdue patients are now consuming capacity instead of being skipped. Push the load slider up and all three policies fail together — no scheduler manufactures staff that are not on shift.
+  </p>
+</div>
+
+<script>
+"use strict";
+
+/* ============================ RNG ============================ */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function gauss(rng){let u=0,v=0;while(u===0)u=rng();while(v===0)v=rng();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+/* ============================ CONFIG ============================ */
+const RES = [
+  {key:"icu",    label:"ICU beds",         cap:6,  tiles:true},
+  {key:"ward",   label:"Ward beds",        cap:22, tiles:true},
+  {key:"or",     label:"Operating rooms",  cap:3,  tiles:true},
+  {key:"doctor", label:"Doctors on shift", cap:9,  tiles:true},
+  {key:"nurse",  label:"Nurses on shift",  cap:20, tiles:true},
+  {key:"amb",    label:"Ambulances",       cap:4,  tiles:true},
+];
+const HOURLY = [0.42,0.36,0.30,0.28,0.32,0.42,0.62,0.88,1.12,1.32,1.38,1.30,1.22,1.16,1.16,1.22,1.32,1.48,1.52,1.40,1.20,0.96,0.72,0.52];
+const BASE_LAMBDA = 0.185;         // arrivals per simulated minute at multiplier 1
+const HORIZON = 1440;              // one day
+const TARGET_WAIT = {1:5, 2:15, 3:35, 4:60, 5:85};   // minutes, door-to-provider targets
+const ACUITY   = {1:1000, 2:60, 3:20, 4:8, 5:3};     // relative claim on scarce capacity
+const DEADLINE = {1:15, 2:45, 3:100, 4:120, 5:95};   // hard "must be seen by", tighter than the walkout point
+const MEAN_DUR   = {1:200, 2:150, 3:95, 4:50, 5:25};
+const LWBS_LIMIT = {4:150, 5:110};
+
+const FIRST=["Asha","Ravi","Meera","Nikhil","Priya","Arjun","Fatima","Dev","Sneha","Imran","Kavya","Rohit","Anita","Yusuf","Divya","Karan","Leela","Sam","Tara","Vikram","Noor","Ishaan","Rhea","Manav","Zoya","Aditya"];
+const LAST=["Rao","Nair","Shah","Iyer","Khan","Bose","Menon","Patel","Reddy","Das","Gill","Joshi","Verma","Pillai","Sethi","Mathew"];
+
+/* ============================ SIM ============================ */
+class Sim {
+  constructor(seed, policy, loadPct){
+    this.rng  = mulberry32(seed>>>0);          // stream A: arrivals + patient generation
+    this.rngB = mulberry32((seed*7919+13)>>>0); // stream B: in-hospital stochastics
+    this.policy = policy;
+    this.load = loadPct/100;
+    this.t = 0;
+    this.nextId = 1;
+    this.units = {};
+    RES.forEach(r => this.units[r.key] = new Array(r.cap).fill(null));
+    this.queue = [];        // waiting inside hospital
+    this.inbound = [];      // en route by ambulance
+    this.ambCalls = [];     // waiting for an ambulance
+    this.active = [];       // being treated / stepping down
+    this.log = [];
+    this.history = [];      // {t, qlen, avgWait}
+    this.stats = {
+      arrived:0, served:0, lwbs:0, deterioration:0, escalations:0, boarded:0, onTime:0,
+      waitSum:0, waitN:0, waits:[], waitByEsi:{1:[],2:[],3:[],4:[],5:[]},
+      util:{}, utilN:0, icuBlockedMin:0, ambDelayMin:0, conflicts:0
+    };
+    RES.forEach(r => this.stats.util[r.key]=0);
+    this.reservations = {};
+  }
+
+  /* ---- resources ---- */
+  free(k){ return this.units[k].filter(x=>x===null).length; }
+  // A critical patient who needs intensive care but finds no ICU bed can be boarded
+  // in a ward bed with the same staffing. Better than leaving them in the corridor.
+  resolve(p){
+    const n = Object.assign({}, p.need);
+    let boarded = 0;
+    if(n.icu){
+      const have = this.free("icu");
+      if(have < n.icu){
+        boarded = n.icu - have;
+        if(have>0) n.icu = have; else delete n.icu;
+        n.ward = (n.ward||0) + boarded;
+      }
+    }
+    return {need:n, boarded};
+  }
+  canTake(need){ for(const k in need){ if(this.free(k) < need[k]) return false; } return true; }
+  take(p, need, until){
+    // canonical ordering + all-or-nothing => no hold-and-wait => no deadlock
+    const order = RES.map(r=>r.key).filter(k=>need[k]);
+    for(const k of order){
+      for(let n=0;n<need[k];n++){
+        const i = this.units[k].indexOf(null);
+        this.units[k][i] = p;
+        p.holds.push({type:k, idx:i, until: until[k]});
+      }
+    }
+  }
+  release(p, type){
+    p.holds = p.holds.filter(h=>{
+      if(h.type!==type) return true;
+      this.units[h.type][h.idx] = null;
+      return false;
+    });
+  }
+  releaseAll(p){
+    p.holds.forEach(h => { this.units[h.type][h.idx] = null; });
+    p.holds = [];
+  }
+
+  /* ---- patients ---- */
+  makePatient(){
+    const r = this.rng(); let esi;
+    if(r<0.05) esi=1; else if(r<0.20) esi=2; else if(r<0.55) esi=3; else if(r<0.85) esi=4; else esi=5;
+    const need = {};
+    if(esi===1){ need.icu=1; need.doctor=1; need.nurse=2; }
+    else if(esi===2){ if(this.rng()<0.40) need.icu=1; else need.ward=1; need.doctor=1; need.nurse=1; }
+    else if(esi===3){ need.ward=1; need.doctor=1; need.nurse=1; }
+    else if(esi===4){ need.ward=1; need.doctor=1; need.nurse=1; }
+    else { need.doctor=1; need.nurse=1; }                      // fast track, no bed
+    const orProb = {1:0.45,2:0.25,3:0.08,4:0.02,5:0}[esi];
+    if(this.rng()<orProb) need.or=1;
+    const dur = Math.max(12, Math.round(MEAN_DUR[esi]*Math.exp(0.34*gauss(this.rng))));
+    const name = FIRST[(this.rng()*FIRST.length)|0]+" "+LAST[(this.rng()*LAST.length)|0][0]+".";
+    return {
+      id:this.nextId++, name, esi, esi0:esi, need, dur,
+      arrive:this.t, wait:0, risk:0, holds:[], phase:"waiting",
+      stepdown: need.icu ? 60+Math.round(this.rng()*120) : 0,
+      byAmb:false, blocked:0, servedAt:null, state:""
+    };
+  }
+
+  lambda(){
+    const hour = Math.floor(((this.t/60)+6)%24);
+    return BASE_LAMBDA * HOURLY[hour] * this.load;
+  }
+
+  addLog(msg, cls){ this.log.push({t:this.t,msg,cls}); if(this.log.length>400) this.log.shift(); }
+  clock(t){ const m=(t+360)%1440; return String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0"); }
+
+  surge(n){
+    n = n || (5 + Math.floor(this.rng()*7));
+    for(let i=0;i<n;i++){
+      const p = this.makePatient();
+      if(p.esi>2 && this.rng()<0.6) p.esi = Math.max(1,p.esi-2);
+      p.byAmb = true;
+      this.queue.push(p); this.stats.arrived++;
+    }
+    this.addLog("Mass casualty: "+n+" patients incoming", "alert");
+  }
+
+  /* ---- scoring ---- */
+  score(p){
+    if(this.policy==="fifo")   return 100000 - p.arrive;
+    if(this.policy==="triage") return ACUITY[p.esi]*1000 - p.arrive*0.001;
+    // MEDFLOW sorts into three tiers.
+    // 1. Resuscitation and emergent cases are never deferred for anyone.
+    if(p.esi===1) return 1e9 + p.wait;
+    if(p.esi===2) return 1e8 + p.wait;
+    // 2. Past the hard deadline, most overdue goes first. This is the starvation
+    //    guarantee: once you are late, nothing newer can overtake you, so the
+    //    worst wait in the department is bounded instead of open-ended.
+    const dl = DEADLINE[p.esi];
+    if(p.wait > dl) return 1e6 + (p.wait - dl)*10 + ACUITY[p.esi];
+    // 3. Everyone else: acuity, stretched by lateness against target and by risk.
+    return ACUITY[p.esi] * (1 + Math.min(3, p.wait/TARGET_WAIT[p.esi])) * (1 + 0.3*p.risk);
+  }
+
+  /* ---- one minute ---- */
+  step(){
+    const t = this.t;
+
+    // 1. arrivals (Poisson thinning, one draw per minute)
+    if(this.rng() < this.lambda()){
+      const p = this.makePatient();
+      const ambProb = {1:0.72,2:0.5,3:0.22,4:0.07,5:0.02}[p.esi];
+      if(this.rng()<ambProb){ p.byAmb=true; this.ambCalls.push({p, called:t}); }
+      else { this.queue.push(p); this.stats.arrived++; }
+    }
+    if(this.rng() < 0.00055*this.load) this.surge();
+
+    // 2. ambulance dispatch
+    for(let i=this.ambCalls.length-1;i>=0;i--){
+      const c = this.ambCalls[i];
+      if(this.free("amb")>0){
+        const idx = this.units.amb.indexOf(null);
+        this.units.amb[idx] = c.p;
+        c.p.ambIdx = idx;
+        c.p.eta = t + 14 + Math.round(this.rng()*16);
+        c.p.ambFree = c.p.eta + 12 + Math.round(this.rng()*14);
+        this.inbound.push(c.p);
+        this.ambCalls.splice(i,1);
+      } else {
+        this.stats.ambDelayMin++;
+        c.p.risk += 0.02*(6-c.p.esi);
+      }
+    }
+    for(let i=this.inbound.length-1;i>=0;i--){
+      const p = this.inbound[i];
+      if(t>=p.eta){ p.arrive=t; this.queue.push(p); this.stats.arrived++; this.inbound.splice(i,1); }
+    }
+    RES.length && this.units.amb.forEach((p,i)=>{ if(p && p.ambFree<=t) this.units.amb[i]=null; });
+
+    // 3. waiting: aging, deterioration, leaving without being seen
+    for(let i=this.queue.length-1;i>=0;i--){
+      const p = this.queue[i];
+      p.wait = t - p.arrive;
+      const rate = {1:0.055,2:0.03,3:0.012,4:0.004,5:0.001}[p.esi];
+      p.risk += rate*(1 + p.wait/90);
+      if(p.esi>1 && this.rngB() < rate*0.055*(p.wait/30)){
+        p.esi--; this.stats.escalations++;
+        this.addLog("#"+p.id+" "+p.name+" deteriorated to level "+p.esi+" after "+p.wait+" min", "alert");
+      }
+      if(p.esi<=2 && p.wait>{1:20,2:55}[p.esi] && this.rngB()<0.006){
+        this.stats.deterioration++;
+        this.addLog("Adverse event: #"+p.id+" level "+p.esi+" waited "+p.wait+" min", "alert");
+        p.risk += 4;
+      }
+      const lim = LWBS_LIMIT[p.esi];
+      if(lim && p.wait>lim && this.rngB()<0.02){
+        this.stats.lwbs++; this.queue.splice(i,1);
+        // they still waited, so their wait belongs in the statistics
+        this.stats.waitSum += p.wait; this.stats.waitN++;
+        this.stats.waits.push(p.wait); this.stats.waitByEsi[p.esi].push(p.wait);
+        this.addLog("#"+p.id+" left without being seen ("+p.wait+" min)");
+      }
+    }
+
+    // 4. progress active patients
+    for(let i=this.active.length-1;i>=0;i--){
+      const p = this.active[i];
+      // timed releases (doctor frees early, theatre frees after the block)
+      p.holds = p.holds.filter(h=>{
+        if(h.until!=null && h.until<=t && !(h.type==="icu"||h.type==="ward")){ this.units[h.type][h.idx]=null; return false; }
+        return true;
+      });
+      if(p.phase==="treating" && t>=p.treatEnd){
+        if(p.holds.some(h=>h.type==="icu") && p.stepdown>0){ p.phase="stepdown"; }
+        else { this.releaseAll(p); p.phase="done"; this.active.splice(i,1); this.addLog("#"+p.id+" discharged","good"); }
+      }
+      else if(p.phase==="stepdown"){
+        if(!p.wardIdx){
+          if(this.free("ward")>0){
+            const idx=this.units.ward.indexOf(null); this.units.ward[idx]=p; p.wardIdx=true;
+            p.holds.push({type:"ward",idx,until:null});
+            this.release(p,"icu");
+            p.stepEnd = t + p.stepdown;
+            p.blocked>0 && this.addLog("#"+p.id+" moved out of ICU after "+p.blocked+" min blocked");
+          } else { p.blocked++; this.stats.icuBlockedMin++; }
+        } else if(t>=p.stepEnd){
+          this.releaseAll(p); p.phase="done"; this.active.splice(i,1); this.addLog("#"+p.id+" discharged","good");
+        }
+      }
+    }
+
+    // 5. ALLOCATE
+    this.allocate();
+
+    // 6. bookkeeping
+    RES.forEach(r=>{ this.stats.util[r.key] += (r.cap - this.free(r.key))/r.cap; });
+    this.stats.utilN++;
+    if(t%10===0){
+      const w = this.queue.length ? this.queue.reduce((s,p)=>s+p.wait,0)/this.queue.length : 0;
+      this.history.push({t, qlen:this.queue.length, avgWait:w});
+      if(this.history.length>49) this.history.shift();
+    }
+    this.t++;
+  }
+
+  allocate(){
+    const t = this.t;
+    this.queue.forEach(p => { p.wait = t-p.arrive; p._s = this.score(p); p.state=""; });
+    this.queue.sort((a,b)=> b._s - a._s);
+
+    // how soon does each resource type next free up?
+    const remaining = {};
+    RES.forEach(r=>{
+      const ends = [];
+      this.active.forEach(p => p.holds.forEach(h=>{
+        if(h.type!==r.key) return;
+        const end = (h.until!=null) ? h.until : (p.phase==="stepdown" ? (p.stepEnd||t+30) : p.treatEnd);
+        ends.push(Math.max(0,end-t));
+      }));
+      ends.sort((a,b)=>a-b);
+      remaining[r.key] = ends;
+    });
+    // how long until `k` more units of this type are free?
+    const windowFor = (k,deficit) => {
+      const e = remaining[k];
+      return e.length >= deficit ? e[deficit-1] : Infinity;
+    };
+
+    const reserved = {};        // resource type -> units held back for a blocked patient
+    const reservedWindow = {};  // resource type -> minutes until that reservation is fillable
+    let blockedHeads = 0;
+    const useReservation = this.policy === "medflow";
+
+    const order = this.queue.slice();
+    for(const p of order){
+      if(p.holds.length) continue;
+      const need = p.need;
+
+      // is this patient competing for a reserved resource?
+      const probe = this.resolve(p).need;
+      let hitsReserved = false, reservedType = null;
+      for(const k in probe){
+        if(reserved[k] && this.free(k) - reserved[k] < probe[k]){ hitsReserved = true; reservedType = k; }
+      }
+
+      if(hitsReserved){
+        // backfill: let this patient through only if they will be finished and out
+        // before the reserved unit is actually needed, so the hold costs nothing
+        const win = reservedWindow[reservedType] || 0;
+        if(p.dur > win){ p.state = "backfill-blocked"; continue; }
+        p.state = "backfill";
+      }
+
+      const res = this.resolve(p);
+      const eff = res.need;
+      if(this.canTake(eff)){
+        const start = t;
+        const until = {};
+        if(need.doctor) until.doctor = start + Math.max(15, Math.round(p.dur*0.45));
+        if(need.or)     until.or     = start + Math.min(p.dur, 35 + Math.round(p.dur*0.35));
+        if(need.nurse)  until.nurse  = start + Math.max(15, Math.round(p.dur*0.75));
+        until.ward = null; until.icu = null;
+        if(!need.ward && !need.icu){ until.nurse = start + p.dur; }
+        this.take(p, eff, until);
+        if(res.boarded){ this.stats.boarded++; this.addLog("#"+p.id+" boarded in a ward bed, ICU full","alert"); }
+        p.phase = "treating";
+        p.treatEnd = start + p.dur;
+        p.servedAt = start;
+        p.wait = start - p.arrive;
+        this.stats.served++;
+        if(p.wait <= TARGET_WAIT[p.esi]) this.stats.onTime++;
+        this.stats.waitSum += p.wait; this.stats.waitN++;
+        this.stats.waits.push(p.wait);
+        this.stats.waitByEsi[p.esi].push(p.wait);
+        this.active.push(p);
+        this.queue.splice(this.queue.indexOf(p),1);
+        this.addLog("#"+p.id+" "+p.name+" (L"+p.esi+") started care after "+p.wait+" min");
+      } else {
+        this.stats.conflicts++;
+        p.state = p.state || "held";
+        // Only hold capacity back for patients who genuinely cannot afford to wait.
+        // Reserving for a level 4 would cost throughput and buy nothing.
+        if(useReservation && blockedHeads < 1 && p.esi <= 2){
+          blockedHeads++;
+          for(const k in probe){
+            const deficit = probe[k] - this.free(k);
+            if(deficit > 0){
+              reserved[k] = (reserved[k]||0) + need[k];
+              reservedWindow[k] = windowFor(k, deficit);
+            }
+          }
+          p.state = "held";
+        }
+      }
+    }
+  }
+
+  compliance(){
+    const resolved = this.stats.served + this.stats.lwbs;
+    return resolved ? this.stats.onTime/resolved*100 : 0;
+  }
+  p95(){
+    if(!this.stats.waits.length) return 0;
+    const a=[...this.stats.waits].sort((x,y)=>x-y);
+    return a[Math.min(a.length-1, Math.floor(a.length*0.95))];
+  }
+  avgWaitEsi(e){
+    const a=this.stats.waitByEsi[e]; if(!a.length) return null;
+    return a.reduce((s,x)=>s+x,0)/a.length;
+  }
+  utilPct(k){ return this.stats.utilN ? (this.stats.util[k]/this.stats.utilN*100) : 0; }
+}
+
+/* ============================ UI ============================ */
+const $ = s => document.querySelector(s);
+let sim, timer=null, speed=6, policy="medflow", running=false;
+
+function build(){
+  const seed = Math.max(1, parseInt($("#seedInput").value)||1);
+  const load = Math.max(30, parseInt($("#loadInput").value)||100);
+  sim = new Sim(seed, policy, load);
+  buildBoard();
+  render();
+}
+
+function buildBoard(){
+  const el = $("#board"); el.innerHTML="";
+  RES.forEach(r=>{
+    const row = document.createElement("div"); row.className="res-row";
+    row.innerHTML =
+      '<div class="res-top"><span class="res-name">'+r.label+'</span>'+
+      '<span class="res-num"><b data-used="'+r.key+'">0</b> of '+r.cap+' in use · <span data-util="'+r.key+'">0%</span> average</span></div>'+
+      '<div class="tiles" data-tiles="'+r.key+'"></div>'+
+      '<div class="meter" data-meter="'+r.key+'"><span style="width:0%"></span></div>';
+    const tiles = row.querySelector("[data-tiles]");
+    for(let i=0;i<r.cap;i++){ const d=document.createElement("div"); d.className="tile"; tiles.appendChild(d); }
+    el.appendChild(row);
+  });
+}
+
+function render(){
+  $("#clock").textContent = sim.clock(sim.t);
+  const day = Math.floor((sim.t+360)/1440)+1;
+  const hour = Math.floor(((sim.t/60)+6)%24);
+  const phase = hour<7?"night":hour<12?"morning":hour<17?"afternoon":hour<22?"evening peak":"night";
+  $("#clockMeta").textContent = "Day "+day+" · "+phase+" · minute "+sim.t+" of "+HORIZON;
+
+  // board
+  RES.forEach(r=>{
+    const tiles = document.querySelectorAll('[data-tiles="'+r.key+'"] .tile');
+    sim.units[r.key].forEach((p,i)=>{
+      const tl = tiles[i]; if(!tl) return;
+      if(p){ tl.dataset.esi = p.esi; tl.classList.toggle("blocked", r.key==="icu" && p.phase==="stepdown"); }
+      else { delete tl.dataset.esi; tl.classList.remove("blocked"); }
+    });
+    const used = r.cap - sim.free(r.key);
+    document.querySelector('[data-used="'+r.key+'"]').textContent = used;
+    document.querySelector('[data-util="'+r.key+'"]').textContent = Math.round(sim.utilPct(r.key))+"%";
+    const m = document.querySelector('[data-meter="'+r.key+'"]');
+    const pct = used/r.cap*100;
+    m.firstElementChild.style.width = pct+"%";
+    m.classList.toggle("hot", pct>=75 && pct<95);
+    m.classList.toggle("crit", pct>=95);
+  });
+
+  // queue
+  const q = $("#queue");
+  if(!sim.queue.length){ q.innerHTML = '<p class="empty">Nobody is waiting. Every patient who has arrived is in a bed.</p>'; }
+  else {
+    q.innerHTML = sim.queue.slice(0,24).map(p=>{
+      const needs = Object.keys(p.need).map(k=>{
+        const lbl = {icu:"ICU",ward:"bed",or:"theatre",doctor:"doctor",nurse:"nurse"}[k];
+        return (p.need[k]>1? p.need[k]+" ":"")+lbl;
+      }).join(" + ");
+      const cls = p.state==="held" ? " held" : (p.state==="backfill" ? " backfill" : "");
+      const note = p.state==="held" ? "holding capacity" : p.state==="backfill" ? "backfilled" : p.state==="backfill-blocked" ? "yielding to reservation" : "";
+      return '<div class="qrow'+cls+'">'+
+        '<div class="badge" data-esi="'+p.esi+'">'+p.esi+'</div>'+
+        '<div><div class="qname">'+p.name+' <span class="qmeta">#'+p.id+(p.byAmb?" · ambulance":"")+(p.esi<p.esi0?" · escalated":"")+'</span></div>'+
+        '<div class="qmeta"><span class="need">'+needs+'</span> · waiting '+p.wait+' min'+(note?" · "+note:"")+'</div></div>'+
+        '<div class="qscore">'+fmtScore(p._s)+'<small>priority</small></div>'+
+      '</div>';
+    }).join("");
+  }
+  $("#queueNote").textContent = sim.queue.length + " waiting · " + sim.inbound.length + " en route · " + sim.active.length + " in care";
+
+  // kpis
+  const avg = sim.stats.waitN ? sim.stats.waitSum/sim.stats.waitN : 0;
+  const a1 = sim.avgWaitEsi(1), a5 = sim.avgWaitEsi(5), cmp = sim.compliance();
+  const k = [
+    ["Seen", sim.stats.served, ""],
+    ["Seen on time", Math.round(cmp)+"%", cmp>70?"good":cmp>45?"warn":"bad"],
+    ["Average wait", Math.round(avg)+"m", avg<25?"good":avg<55?"warn":"bad"],
+    ["95th percentile", sim.p95()+"m", sim.p95()<70?"good":sim.p95()<140?"warn":"bad"],
+    ["Level 1 wait", a1==null?"—":Math.round(a1)+"m", a1==null?"":a1<8?"good":a1<20?"warn":"bad"],
+    ["Level 5 wait", a5==null?"—":Math.round(a5)+"m", a5==null?"":a5<90?"good":a5<180?"warn":"bad"],
+    ["Adverse events", sim.stats.deterioration, sim.stats.deterioration===0?"good":"bad"],
+    ["Walked out", sim.stats.lwbs, sim.stats.lwbs<3?"good":"warn"],
+    ["Boarded in ward", sim.stats.boarded, sim.stats.boarded===0?"good":"warn"],
+    ["ICU blocked", sim.stats.icuBlockedMin+"m", sim.stats.icuBlockedMin<30?"good":"bad"],
+    ["No ambulance", sim.stats.ambDelayMin+"m", sim.stats.ambDelayMin<40?"good":"warn"],
+  ];
+  $("#kpis").innerHTML = k.map(([l,v,c])=>'<div class="kpi"><div class="v '+c+'">'+v+'</div><div class="l">'+l+'</div></div>').join("");
+
+  // log
+  $("#log").innerHTML = sim.log.slice(-40).reverse().map(e=>
+    '<div class="logrow '+(e.cls||"")+'"><time>'+sim.clock(e.t)+'</time><span>'+e.msg+'</span></div>').join("");
+
+  drawChart();
+}
+
+function fmtScore(v){
+  if(v==null) return "—";
+  if(v>=1e9) return '<span style="color:var(--esi1)">first</span>';
+  if(v>=1e6) return '<span style="color:var(--warn)">overdue</span>';
+  return v.toFixed(1);
+}
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function drawChart(){
+  const c = $("#chart"), dpr = window.devicePixelRatio||1;
+  const w = c.clientWidth, h = 140;
+  if(c.width !== w*dpr || c.height !== h*dpr){ c.width=w*dpr; c.height=h*dpr; }
+  const x = c.getContext("2d");
+  x.setTransform(dpr,0,0,dpr,0,0);
+  x.clearRect(0,0,w,h);
+  const d = sim.history;
+  if(d.length<2){
+    x.fillStyle = cssVar("--text-3"); x.font='12px "IBM Plex Sans", sans-serif';
+    x.fillText("Data appears once the simulation runs.", 10, h/2); return;
+  }
+  const maxQ = Math.max(6, ...d.map(p=>p.qlen));
+  const maxW = Math.max(20, ...d.map(p=>p.avgWait));
+  x.strokeStyle = cssVar("--line-soft"); x.lineWidth=1;
+  for(let i=0;i<=3;i++){ const y=8+(h-24)*i/3; x.beginPath(); x.moveTo(0,y); x.lineTo(w,y); x.stroke(); }
+  const line = (key,max,color,fill)=>{
+    x.beginPath();
+    d.forEach((p,i)=>{
+      const px = i/(d.length-1)*(w-6)+3;
+      const py = 8+(h-24)*(1 - p[key]/max);
+      i? x.lineTo(px,py) : x.moveTo(px,py);
+    });
+    x.strokeStyle=color; x.lineWidth=2; x.stroke();
+    if(fill){ x.lineTo(w-3,h-16); x.lineTo(3,h-16); x.closePath(); x.fillStyle=color+"22"; x.fill(); }
+  };
+  line("qlen",maxQ,cssVar("--accent"),true);
+  line("avgWait",maxW,cssVar("--warn"),false);
+  x.fillStyle=cssVar("--text-3"); x.font='11px "IBM Plex Sans", sans-serif';
+  x.fillText(maxQ+" waiting", 4, h-3);
+  x.fillText(Math.round(maxW)+" min peak", w-84, h-3);
+}
+
+/* ---------- loop ---------- */
+function tick(){
+  if(!running) return;
+  for(let i=0;i<speed && sim.t<HORIZON;i++) sim.step();
+  render();
+  if(sim.t>=HORIZON){ running=false; $("#playBtn").textContent="Day complete"; $("#playBtn").disabled=true; return; }
+  timer = requestAnimationFrame(tick);
+}
+
+/* ---------- benchmark ---------- */
+function runHeadless(seed, pol, load){
+  const s = new Sim(seed, pol, load);
+  while(s.t<HORIZON) s.step();
+  return s;
+}
+function benchmark(){
+  const seed = Math.max(1, parseInt($("#seedInput").value)||1);
+  const load = Math.max(30, parseInt($("#loadInput").value)||100);
+  $("#bench").innerHTML = '<p class="empty">Simulating three full days…</p>';
+  setTimeout(()=>{
+    const names = {
+      fifo:["First come, first served","Ignores urgency entirely — the baseline"],
+      triage:["Strict triage","Urgency only, no aging or reservation"],
+      medflow:["MEDFLOW","Weighted priority, aging, reservation with backfill"]
+    };
+    const rows = ["fifo","triage","medflow"].map(pol=>{
+      const s = runHeadless(seed,pol,load);
+      const avg = s.stats.waitN? s.stats.waitSum/s.stats.waitN : 0;
+      return {
+        pol, name:names[pol],
+        served:s.stats.served,
+        ontime:s.compliance(),
+        avg:avg,
+        l1: s.avgWaitEsi(1), l2:s.avgWaitEsi(2), l5:s.avgWaitEsi(5),
+        p95:s.p95(), adverse:s.stats.deterioration, esc:s.stats.escalations,
+        lwbs:s.stats.lwbs, block:s.stats.icuBlockedMin,
+        bedUtil:(s.utilPct("ward")+s.utilPct("icu"))/2
+      };
+    });
+    const fmt = v => v==null? "—" : Math.round(v);
+    const cols = [
+      ["Seen","served",    "max"],
+      ["On time","ontime", "max"],
+      ["Avg wait","avg",   "min"],
+      ["95th pct","p95",   "min"],
+      ["L1 wait","l1",     "min"],
+      ["L2 wait","l2",     "min"],
+      ["L5 wait","l5",     "min"],
+      ["Adverse","adverse","min"],
+      ["Walked out","lwbs","min"],
+      ["Bed use","bedUtil","max"],
+    ];
+    const best = {};
+    cols.forEach(([,key,dir])=>{
+      const vals = rows.map(r=>r[key]).filter(v=>v!=null);
+      best[key] = dir==="max"? Math.max(...vals) : Math.min(...vals);
+    });
+    let html = '<table><thead><tr><th>Policy</th>'+cols.map(c=>'<th>'+c[0]+'</th>').join("")+'</tr></thead><tbody>';
+    rows.forEach(r=>{
+      html += '<tr class="'+(r.pol==="medflow"?"win":"")+'"><td class="policy-name">'+r.name[0]+'<small>'+r.name[1]+'</small></td>';
+      cols.forEach(([,key])=>{
+        const v = r[key];
+        const isBest = v!=null && Math.round(v)===Math.round(best[key]);
+        const suffix = (key==="bedUtil"||key==="ontime")?"%":(["avg","l1","l2","l5","p95"].includes(key)?"m":"");
+        html += '<td class="'+(isBest?"best":"")+'">'+(v==null?"—":fmt(v)+suffix)+'</td>';
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table><div class="legend"><span>Same seed, same arrivals, same capacity. Green marks the best figure in each column.</span></div>';
+    $("#bench").innerHTML = html;
+  }, 30);
+}
+
+/* ---------- wiring ---------- */
+$("#playBtn").addEventListener("click", ()=>{
+  running = !running;
+  $("#playBtn").textContent = running ? "Pause" : "Resume";
+  if(running) tick();
+});
+$("#resetBtn").addEventListener("click", ()=>{
+  running=false; cancelAnimationFrame(timer);
+  $("#playBtn").textContent="Start"; $("#playBtn").disabled=false;
+  build();
+});
+document.querySelectorAll("[data-speed]").forEach(b=>b.addEventListener("click",()=>{
+  speed = +b.dataset.speed;
+  document.querySelectorAll("[data-speed]").forEach(x=>x.setAttribute("aria-pressed", x===b));
+}));
+document.querySelectorAll("[data-policy]").forEach(b=>b.addEventListener("click",()=>{
+  policy = b.dataset.policy;
+  document.querySelectorAll("[data-policy]").forEach(x=>x.setAttribute("aria-pressed", x===b));
+  const wasRunning = running; running=false; cancelAnimationFrame(timer);
+  build();
+  $("#playBtn").textContent="Start"; $("#playBtn").disabled=false;
+  if(wasRunning){ running=true; $("#playBtn").textContent="Pause"; tick(); }
+}));
+$("#surgeBtn").addEventListener("click", ()=>{ sim.surge(8); render(); });
+$("#benchBtn").addEventListener("click", benchmark);
+$("#seedInput").addEventListener("change", ()=>{ running=false; $("#playBtn").textContent="Start"; $("#playBtn").disabled=false; build(); });
+$("#loadInput").addEventListener("change", ()=>{ running=false; $("#playBtn").textContent="Start"; $("#playBtn").disabled=false; build(); });
+$("#themeBtn").addEventListener("click", ()=>{
+  const cur = document.documentElement.getAttribute("data-theme");
+  const dark = cur ? cur==="dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", dark? "light":"dark");
+  render();
+});
+window.addEventListener("resize", ()=>drawChart());
+
+build();
+</script>
+</body>
+</html>
