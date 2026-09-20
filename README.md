@@ -355,3 +355,14 @@ Patients are not lost during the simulation
 Scheduling deadlines are respected
 Results are deterministic for the same seed
 Different policies can be compared consistently
+
+References
+Software Libraries & Frameworks
+SimPy (Discrete-Event Simulation):
+Team SimPy. SimPy: Discrete Event Simulation for Python. Read the Docs. Available at: https://simpy.readthedocs.io/
+Anthropic Claude API:
+Anthropic. Claude AI Developer Documentation & API Reference. Available at: https://docs.anthropic.com/
+FastAPI Web Framework:
+Ramírez, S. (Tiangolo). FastAPI: High Performance Python Web Framework. Available at: https://fastapi.tiangolo.com/
+Python Programming Language:
+Python Software Foundation. Python Language Reference, Version 3.x. Available at: https://www.python.org/
