@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from starlette.concurrency import run_in_threadpool
@@ -158,6 +158,7 @@ def reset(run_id: str) -> Dict[str, Any]:
 def delete_run(run_id: str) -> None:
     if not store.delete(run_id):
         raise HTTPException(status_code=404, detail=f"No run {run_id}")
+    return Response(status_code=204)
 
 
 @app.get("/api/runs/{run_id}/metrics", tags=["runs"])
