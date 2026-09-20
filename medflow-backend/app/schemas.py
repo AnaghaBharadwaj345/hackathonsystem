@@ -2,21 +2,17 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-
 from pydantic import BaseModel, Field, field_validator
-
 from .sim import DEFAULT_CAPACITY, HORIZON, POLICIES, RES_KEYS
 
 
 class CapacityIn(BaseModel):
-    """Override any subset of the department's resources."""
     icu: Optional[int] = Field(None, ge=0, le=200)
     ward: Optional[int] = Field(None, ge=0, le=500)
     or_: Optional[int] = Field(None, ge=0, le=100, alias="or")
     doctor: Optional[int] = Field(None, ge=0, le=300)
     nurse: Optional[int] = Field(None, ge=0, le=600)
     amb: Optional[int] = Field(None, ge=0, le=100)
-
     model_config = {"populate_by_name": True}
 
     def to_dict(self) -> Dict[str, int]:
@@ -27,7 +23,7 @@ class CapacityIn(BaseModel):
 class RunCreate(BaseModel):
     seed: int = Field(4207, ge=1, le=2_147_483_647)
     policy: str = "medflow"
-    load_pct: int = Field(100, ge=10, le=400, description="Arrival volume as a percentage of the baseline day")
+    load_pct: int = Field(100, ge=10, le=400)
     capacity: Optional[CapacityIn] = None
     horizon_min: int = Field(HORIZON, ge=60, le=10080)
 
@@ -44,14 +40,43 @@ class AdvanceIn(BaseModel):
 
 
 class SurgeIn(BaseModel):
-    count: int = Field(8, ge=1, le=60, description="Number of casualties to inject now")
+    count: int = Field(8, ge=1, le=60)
+
+
+class PatientCreate(BaseModel):
+    patient_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=200)
+    date_of_birth: Optional[str] = Field(None, max_length=30)
+    sex: Optional[str] = Field(None, max_length=30)
+    phone: Optional[str] = Field(None, max_length=40)
+    allergies: Optional[str] = Field(None, max_length=2000)
+    chronic_conditions: Optional[str] = Field(None, max_length=2000)
+
+
+class HistoryCreate(BaseModel):
+    condition: str = Field(..., min_length=1, max_length=500)
+    notes: Optional[str] = Field(None, max_length=5000)
+
+
+class AdmissionCreate(BaseModel):
+    patient_id: str = Field(..., min_length=1, max_length=100)
+    run_id: Optional[str] = Field(None, max_length=100)
+    admitted_at: Optional[str] = None
+    discharged_at: Optional[str] = None
+    triage_level: Optional[int] = Field(None, ge=1, le=5)
+    chief_complaint: Optional[str] = Field(None, max_length=2000)
+    diagnosis: Optional[str] = Field(None, max_length=2000)
+    treatment: Optional[str] = Field(None, max_length=5000)
+    outcome: Optional[str] = Field(None, max_length=500)
+    wait_min: Optional[int] = Field(None, ge=0)
+    treatment_min: Optional[int] = Field(None, ge=0)
 
 
 class BenchmarkIn(BaseModel):
     seed: int = Field(4207, ge=1, le=2_147_483_647)
     load_pct: int = Field(100, ge=10, le=400)
     policies: Optional[List[str]] = None
-    replications: int = Field(1, ge=1, le=25, description="Distinct seeds per policy")
+    replications: int = Field(1, ge=1, le=25)
     capacity: Optional[CapacityIn] = None
 
     @field_validator("policies")
