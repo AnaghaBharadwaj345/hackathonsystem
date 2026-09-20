@@ -1,201 +1,289 @@
-# MEDFLOW API
+MEDFLOW simulates the flow of patients through an emergency department where resources such as ICU beds, ward beds, doctors, nurses, operating rooms, and ambulances are limited.
 
-Backend for the hospital resource management simulator. A discrete-event model
-of an emergency department, a scheduler that decides who gets the next bed, and
-an HTTP API around both.
+The main problem is deciding which patient should be treated next when several patients are waiting and resources are unavailable.
 
-The engine is a bit-exact port of the browser build, so a run demonstrated in
-the UI reproduces byte for byte on the server. `tests/test_sim.py` asserts it.
+The system compares three scheduling policies:
 
-```
-app/
-  sim.py       simulation engine and scheduler. No web framework, no I/O.
-  schemas.py   request and response models
-  store.py     in-memory run registry with locking and TTL eviction
-  main.py      FastAPI app: REST endpoints and the live WebSocket feed
-tests/         invariant, determinism, parity and API checks
-```
+First come, first served
+Strict triage
+MEDFLOW, which combines urgency, waiting time, clinical deadlines, deterioration risk, and resource reservations.
+The purpose is to demonstrate how a smarter scheduling policy can reduce patient walkouts, waiting-time problems, and adverse events.”
 
-## Run it
+The repository is primarily written in Python, with an HTML and JavaScript frontend and a Dockerfile for containerized deployment.
 
-```bash
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
+At the root level, the important files are:
 
-Interactive docs at `http://localhost:8000/docs`.
+Text
+README.md
+main.py
+sim.py
+medflow.html
+test_sim.py
+medflow-backend/
+The repository has two main parts:
 
-```bash
-docker build -t medflow-api . && docker run -p 8000:8000 medflow-api
-```
+The standalone browser simulator in medflow.html
+The FastAPI backend inside medflow-backend”
+“The README explains the purpose of MEDFLOW, how to run it, the available API endpoints, the scheduling policies, and how to interpret the results.
 
-## Endpoints
+It also documents the important design principles, including deterministic simulations, resource capacity limits, and fair policy comparisons.”
 
-| Method | Path | What it does |
-| --- | --- | --- |
-| `GET` | `/api/health` | Liveness and active run count |
-| `GET` | `/api/config` | Policies, resources, triage levels, clinical targets |
-| `POST` | `/api/runs` | Create a run from a seed, policy, load and capacity |
-| `GET` | `/api/runs` | List live runs |
-| `GET` | `/api/runs/{id}` | Full snapshot: resources, queue, metrics, log |
-| `POST` | `/api/runs/{id}/advance` | Step the clock forward by N minutes |
-| `POST` | `/api/runs/{id}/surge` | Inject a mass casualty incident now |
-| `POST` | `/api/runs/{id}/reset` | Rewind to minute zero, same configuration |
-| `DELETE` | `/api/runs/{id}` | Discard a run |
-| `GET` | `/api/runs/{id}/metrics` | Just the headline numbers |
-| `GET` | `/api/runs/{id}/patients.csv` | Patient-level export, one row per departure |
-| `POST` | `/api/benchmark` | Every policy over identical seeds, with a winner per column |
-| `POST` | `/api/what-if` | Marginal value of one more bed, doctor or nurse |
-| `WS` | `/ws/runs/{id}` | Live snapshot stream with pause, speed and surge commands |
+medflow.html
+[Screen: Open medflow.html or show it in the browser]
 
-### Create and advance
+“This is the frontend application.
 
-```bash
-RID=$(curl -s -X POST localhost:8000/api/runs \
-  -H 'content-type: application/json' \
-  -d '{"seed":4207,"policy":"medflow","load_pct":120}' | jq -r .run_id)
+It contains:
 
-curl -s -X POST localhost:8000/api/runs/$RID/advance \
-  -H 'content-type: application/json' -d '{"minutes":600}' | jq .snapshot.metrics
-```
+The user interface
+Styling
+The JavaScript simulation engine
+The controls for starting, pausing, resetting, and speeding up the simulation
+The capacity board
+The patient queue
+The event log
+Live metrics
+The policy comparison table
+The chart showing queue depth and average wait time
+The HTML file is designed to work independently in the browser. This means the simulator can still be demonstrated even if the backend is not running.”
 
-Capacity is overridable per run:
+Root sim.py
+“This is a Python version of the simulation engine.
 
-```json
-{"seed": 4207, "policy": "medflow", "load_pct": 130,
- "capacity": {"icu": 10, "doctor": 12, "or": 4}}
-```
+It contains the main Sim class, patient generation, resource allocation, scheduling policies, metrics, benchmarking, and what-if analysis.
 
-### Compare policies
+The Python engine is designed to reproduce the behavior of the JavaScript engine using the same deterministic random-number generation approach.”
 
-```bash
-curl -s -X POST localhost:8000/api/benchmark \
-  -H 'content-type: application/json' \
-  -d '{"seed":4207,"load_pct":100,"replications":5}' | jq '.rows[] | {policy, seen, walked_out, adverse_events}'
-```
+oot main.py
+“This file is an API entry-point version of the project
+ests sim pyThis file contains tests for the simulation logic.
 
-`replications` runs several seeds per policy and reports a standard deviation
-alongside each mean, so you can tell a real difference from a lucky run.
+The tests check important properties such as:
 
-### Price a staffing decision
+Resources are never over capacity
+A resource is not assigned to two patients at the same time
+Every patient is accounted for
+The same seed produces reproducible results
+MEDFLOW prevents starvation better than strict triage
+The Python and JavaScript engines produce matching results
 
-```bash
-curl -s -X POST localhost:8000/api/what-if \
-  -H 'content-type: application/json' \
-  -d '{"seed":4207,"load_pct":150,"replications":3}' | jq '.options[] | {label, change}'
-```
+The MEDFLOW backend is built using Python and FastAPI. It provides APIs to create and control emergency-department simulation runs.
 
-Adds one unit of each resource in turn, re-runs the same seeds and ranks the
-options by reduction in harm and abandonment. At 150% load on the default
-department, one more doctor removes roughly 25 adverse events and 21 walkouts
-a day, while one more ward bed changes almost nothing. That is the answer to
-"where is our bottleneck", and it is the most persuasive thing in the project.
+The main file, app/main.py, defines endpoints for creating runs, advancing simulated time, triggering mass-casualty events, resetting runs, viewing metrics, exporting results, comparing policies, and performing what-if resource analysis.
 
-### Live feed
+The simulation logic is implemented in app/sim.py. It models patient arrivals, triage levels, waiting times, resource allocation, treatment, deterioration, walkouts, and resource utilization
 
-```js
-const ws = new WebSocket(`ws://localhost:8000/ws/runs/${runId}?speed=30`);
-ws.onmessage = (e) => render(JSON.parse(e.data).snapshot);
-ws.send(JSON.stringify({ action: "surge", count: 8 }));
-ws.send(JSON.stringify({ action: "speed", value: 120 }));
-ws.send(JSON.stringify({ action: "pause" }));
-```
+his is the MEDFLOW simulator interface.
 
-Each message advances `speed` simulated minutes and returns a full snapshot.
+At the top, we have:
 
-## The scheduler
+- Start and pause controls
+- Reset control
+- Simulation speed
+- Scheduling policy selection
+- Seed input
+- Load percentage
+- Mass-casualty trigger
+- Theme selection”
 
-Three policies, so the comparison has a baseline.
+### Capacity Board
 
-- **First come, first served.** Arrival order, urgency ignored.
-- **Strict triage.** Urgency only. No aging, so low-acuity patients starve.
-- **MEDFLOW.** The one being argued for.
+“The capacity board shows:
 
-MEDFLOW sorts the queue every simulated minute into three tiers:
+- ICU beds
+- Ward beds
+- Operating rooms
+- Doctors
+- Nurses
+- Ambulances
 
-1. Resuscitation and emergent cases are never deferred for anyone.
-2. Anyone past their hard clinical deadline is served most-overdue-first. This
-   is the starvation guarantee, and it is why level 4 and 5 patients stop
-   walking out. Acuity breaks exact ties.
-3. Everyone else is ranked by acuity, stretched by how far past target they have
-   waited and by modelled deterioration risk.
+Each tile represents one resource unit.
 
-Resources are then acquired as whole bundles, atomically and in a fixed global
-order: a patient is admitted only when the bed, the clinician and the nurses are
-free at the same instant. A patient therefore never holds one resource while
-waiting for another, so the Coffman hold-and-wait condition is never satisfied
-and deadlock is structurally impossible rather than merely unlikely.
+The colors represent the five triage levels.”
 
-When the top patient still cannot be placed, the resource they are short of is
-reserved instead of being handed down the queue, and someone lower is backfilled
-into it only if they will be finished before the reservation comes due — the
-backfill idea borrowed from HPC batch schedulers. A critical patient who needs
-intensive care and finds no ICU bed is boarded in a ward bed rather than left
-waiting.
+### Waiting Queue
 
-## Reading the results honestly
+“The waiting queue shows patients in priority order.
 
-Two things make the numbers trustworthy, and they are worth saying out loud
-when presenting.
+It displays:
 
-**Arrivals run on a separate random stream from in-hospital events.** For a
-given seed every policy faces the identical patient sequence, so the only
-variable is the ordering decision.
+- Patient name
+- Patient ID
+- Triage level
+- Waiting time
+- Required resources
+- Priority score
+- Ambulance status
+- Deterioration status
+- Whether the patient is being held or backfilled”
 
-**Waiting times include people who left without being seen.** Without this a
-policy that abandons its long waiters looks artificially fast, because the
-patients who would have dragged the average up are never counted.
+### Live Outcomes
 
-With those in place, MEDFLOW does not win every column, and claiming it does
-will not survive a sharp question. On the default department at 100% load,
-averaged over ten seeds:
+“The live outcomes panel displays:
 
-- Against first-come ordering it wins outright, with roughly an order of
-  magnitude fewer adverse events.
-- Against strict triage it treats more patients and cuts walkouts by more than
-  half, because overdue patients stop being skipped forever.
-- Against strict triage on adverse events the two are level. Both are far better
-  than first-come; neither is meaningfully better than the other.
-- It pays for the walkout reduction with somewhat longer average waits for
-  level 2 and 3 patients, because capacity that strict triage would have given
-them now goes to overdue patients instead.
+- Patients seen
+- Patients seen on time
+- Average wait
+- 95th percentile wait
+- Level 1 wait
+- Level 5 wait
+- Adverse events
+- Patients who walked out
+- Patients boarded in a ward
+- ICU blocked time
+- Ambulance delay”
 
-Push `load_pct` high enough and all three policies fail together. No scheduler
-manufactures staff who are not on shift, which is the point of `/api/what-if`.
+### Queue Chart
 
-## Wiring the existing frontend
+“The chart shows the queue depth and average waiting time over the simulation.”
 
-The browser build carries its own copy of the engine, so it works standalone.
-To drive it from the server instead, replace the `tick()` loop with the
-WebSocket feed and render from `snapshot` — the field names in
-`Sim.snapshot()` deliberately mirror what the UI already draws. Keep the local
-engine as an offline fallback; a demo that survives conference wifi failing is
-worth the duplication.
+### Event Log
 
-## Tests
+“The event log records important events such as:
 
-```bash
-pytest -q
-MEDFLOW_HTML=/path/to/medflow.html pytest -q   # also runs the JS parity test
-```
+- Patients starting treatment
+- Patients being discharged
+- Patient deterioration
+- Patients leaving without being seen
+- Mass-casualty events
+- Patients being boarded because of ICU capacity”
 
-The invariant tests are the ones to point at if someone asks whether the model
-is sound: capacity is never exceeded, no resource unit is ever double-booked,
-no patient vanishes, and the deadline ordering rule is asserted directly rather
-than inferred from averages.
+---
 
-## Runtime flow
+## 12. Demonstrate the Simulator
 
-The actual usage flow is:
+“I will start with the default configuration:
 
-1. User opens the frontend or calls the API.
-2. A new simulation run is created.
-3. Patients arrive based on the chosen seed and load level.
-4. The policy decides who gets served next.
-5. Resources are checked and assigned as a bundle.
-6. The simulation steps forward in time.
-7. Metrics are computed and returned.
-8. The user can reset, surge, benchmark, or compare resource scenarios.
+- Seed: 4207
+- Load: 100 percent
+- Policy: MEDFLOW
 
-This is the core execution path of the project: patient arrival → policy
-selection → resource allocation → simulation advance → metrics and visibility.
+I click **Start**.
+
+The clock begins advancing. New patients arrive, they are placed in the waiting queue, and the scheduler assigns resources when they become available.”
+
+“I can increase the speed to 6 times, 30 times, or 120 times to complete the simulation faster.”
+
+“Now I will trigger a mass-casualty event.
+
+The queue increases, the resources become more occupied, and the event log records the incoming patients.”
+
+“I can pause the simulation to inspect the queue and understand why one patient has a higher priority than another.”
+
+“Next, I can switch from MEDFLOW to First Come and reset the simulation.
+
+I can run the same seed again using Strict Triage and MEDFLOW.
+
+Because the seed remains the same, the patient arrival pattern remains consistent, which makes the comparison fair.”
+
+“Finally, I click **Run all three** to display the policy comparison table.”
+
+---
+
+## 13. Explain How the Simulator Works
+
+“The simulator advances one simulated minute at a time.
+
+Each minute follows these steps:
+
+### Step 1: Patient arrivals
+
+Patients arrive based on the time of day and the selected load percentage.
+
+Higher load means more patients entering the department.”
+
+### Step 2: Ambulance handling
+
+Some patients arrive by ambulance.
+
+The simulator checks ambulance availability and tracks the time until the patient reaches the department.”
+
+### Step 3: Waiting-patient updates
+
+Waiting patients accumulate waiting time and clinical risk.
+
+Some patients can deteriorate to a higher triage level.
+
+Lower-acuity patients may eventually leave without being seen if they wait too long.”
+
+### Step 4: Treatment progress
+
+Patients who are already receiving care continue through their treatment.
+
+Resources are released when they are no longer needed.”
+
+### Step 5: Resource allocation
+
+The selected scheduling policy sorts the waiting queue.
+
+MEDFLOW checks whether the complete resource bundle is available before admitting a patient.
+
+For example, a patient may require:
+
+- One bed
+- One doctor
+- One or more nurses
+- Possibly an operating room
+
+The system assigns these resources together rather than allowing a patient to hold one resource while waiting for another.”
+
+### Step 6: Metrics
+
+The simulator updates:
+
+- Queue size
+- Average waiting time
+- Resource utilization
+- Patients served
+- Patients who walked out
+- Adverse events
+- Deterioration
+- Ambulance delays
+- ICU blocking time”
+
+- The 3rd policy is MEDFLOW, the selected policy in the simulator. It is a hybrid scheduling strategy designed to balance urgency with fairness.
+
+How MEDFLOW prioritizes patients
+Every simulated minute, MEDFLOW recalculates each waiting patient’s priority and sorts the queue into three tiers:
+
+Resuscitation and emergent patients first
+
+Level 1 patients receive the highest priority.
+Level 2 patients come next.
+Their priority is effectively above all other patients, so they are not deferred by lower-acuity cases.
+Overdue patients next
+
+Each acuity level has a hard deadline:
+Level 1: 15 minutes
+Level 2: 45 minutes
+Level 3: 100 minutes
+Level 4: 120 minutes
+Level 5: 95 minutes
+Once a patient passes their deadline, MEDFLOW prioritizes them according to how overdue they are.
+This prevents lower-acuity patients from waiting indefinitely and is the policy’s starvation guarantee.
+All other patients
+
+Patients who are not emergent and not overdue are ranked using:
+Acuity
+Waiting time relative to their target
+Deterioration risk
+Waiting increases a patient’s score, so the policy gradually raises the priority of patients who have been waiting too long.
+The scoring logic is implemented in medflow.html at score(p).
+
+How resources are assigned
+MEDFLOW does not assign patients one resource at a time. It checks whether the patient’s entire resource bundle is available—for example, a bed, doctor, nurse, and possibly an operating room—and acquires them atomically.
+
+This means a patient cannot hold a bed while waiting for a doctor, preventing resource deadlocks. See allocate().
+
+Reservation and backfill
+If a high-priority Level 1 or Level 2 patient cannot currently be admitted because a resource is unavailable, MEDFLOW can reserve capacity for that patient.
+
+While waiting for the resource:
+
+A shorter patient may still be admitted if they can finish before the reserved resource becomes available. This is called backfill.
+A longer patient is blocked from using that reserved capacity.
+Reservations are limited to genuinely urgent patients, so Level 4 patients do not unnecessarily reduce throughput.
+ICU overflow behavior
+If an ICU bed is unavailable, a patient who needs ICU care may temporarily be boarded in a ward bed, while retaining the required staffing. This is tracked as a boarded patient and contributes to ICU-blocked time.
+
+
