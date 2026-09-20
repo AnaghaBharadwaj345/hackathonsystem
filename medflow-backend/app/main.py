@@ -1,343 +1,146 @@
-"""
-MEDFLOW API.
-
-Run it:      uvicorn app.main:app --reload
-Docs:        http://localhost:8000/docs
-Live feed:   ws://localhost:8000/ws/runs/{run_id}?speed=30
-"""
+"""Request and response models for the MEDFLOW API."""
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
-from starlette.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field, field_validator
 
-from . import sim as engine
-from .db import (
-    add_admission,
-    add_history,
-    create_patient,
-    get_patient,
-    init_db,
-    list_patients,
-)
-from .schemas import (
-    AdmissionCreate,
-    AdvanceIn,
-    BenchmarkIn,
-    HistoryCreate,
-    PatientCreate,
-    RunCreate,
-    SurgeIn,
-    WhatIfIn,
-)
-from .store import store
-
-app = FastAPI(
-    title="MEDFLOW API",
-    version="1.0.0",
-    description=(
-        "Hospital resource allocation simulator with persistent patient records."
-    ),
-)
-
-# Wide open so a static frontend on any port can talk to it during a hackathon.
-# Narrow this before anything real.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from .sim import DEFAULT_CAPACITY, HORIZON, POLICIES, RES_KEYS
 
 
-@app.on_event("startup")
-def startup() -> None:
-    """Create the SQLite database and tables when the API starts."""
-    init_db()
+class CapacityIn(BaseModel):
+    """Override any subset of the department's resources."""
+
+    icu: Optional[int] = Field(None, ge=0, le=200)
+    ward: Optional[int] = Field(None, ge=0, le=500)
+    or_: Optional[int] = Field(None, ge=0, le=100, alias="or")
+    doctor: Optional[int] = Field(None, ge=0, le=300)
+    nurse: Optional[int] = Field(None, ge=0, le=600)
+    amb: Optional[int] = Field(None, ge=0, le=100)
+
+    model_config = {"populate_by_name": True}
+
+    def to_dict(self) -> Dict[str, int]:
+        raw = self.model_dump(by_alias=True, exclude_none=True)
+        return {k: v for k, v in raw.items() if k in RES_KEYS}
 
 
-def _capacity(payload) -> Dict[str, int] | None:
-    return payload.capacity.to_dict() if payload and payload.capacity else None
+class RunCreate(BaseModel):
+    seed: int = Field(4207, ge=1, le=2_147_483_647)
+    policy: str = "medflow"
+    load_pct: int = Field(100, ge=10, le=400, description="Arrival volume as a percentage of the baseline day")
+    capacity: Optional[CapacityIn] = None
+    horizon_min: int = Field(HORIZON, ge=60, le=10080)
+
+    @field_validator("policy")
+    @classmethod
+    def _policy(cls, v: str) -> str:
+        if v not in POLICIES:
+            raise ValueError(f"policy must be one of {', '.join(POLICIES)}")
+        return v
 
 
-def _handle(run_id: str):
-    h = store.get(run_id)
-    if h is None:
-        raise HTTPException(status_code=404, detail=f"No run {run_id}. It may have expired.")
-    return h
+class AdvanceIn(BaseModel):
+    minutes: int = Field(60, ge=1, le=10080)
 
 
-# --------------------------------------------------------------------------
-# meta
-# --------------------------------------------------------------------------
-@app.get("/api/health", tags=["meta"])
-def health() -> Dict[str, Any]:
-    return {"status": "ok", "active_runs": store.count()}
+class SurgeIn(BaseModel):
+    count: int = Field(8, ge=1, le=60, description="Number of casualties to inject now")
 
 
-@app.get("/api/config", tags=["meta"])
-def config() -> Dict[str, Any]:
-    """Everything a client needs to build its own UI without hard-coding constants."""
-    return {
-        "policies": [
-            {"key": "fifo", "label": engine.POLICY_LABELS["fifo"],
-             "description": "Serves in arrival order and ignores urgency. The baseline."},
-            {"key": "triage", "label": engine.POLICY_LABELS["triage"],
-             "description": "Urgency only. No aging, so low-acuity patients can starve."},
-            {"key": "medflow", "label": engine.POLICY_LABELS["medflow"],
-             "description": "Three-tier priority with deadline guarantee, atomic bundle acquisition, and reservation with backfill."},
-        ],
-        "resources": [
-            {"key": k, "label": label, "default_capacity": cap}
-            for k, label, cap in engine.RESOURCES
-        ],
-        "triage_levels": [
-            {"level": 1, "label": "Resuscitation"},
-            {"level": 2, "label": "Emergent"},
-            {"level": 3, "label": "Urgent"},
-            {"level": 4, "label": "Less urgent"},
-            {"level": 5, "label": "Non-urgent"},
-        ],
-        "target_wait_min": engine.TARGET_WAIT,
-        "deadline_min": engine.DEADLINE,
-        "horizon_min": engine.HORIZON,
-        "day_starts_at": "06:00",
-    }
+class PatientCreate(BaseModel):
+    patient_id: Optional[str] = Field(None, min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=200)
+    date_of_birth: Optional[str] = Field(None, max_length=30)
+    sex: Optional[str] = Field(None, max_length=30)
+    phone: Optional[str] = Field(None, max_length=40)
+    allergies: Optional[str] = Field(None, max_length=2000)
+    chronic_conditions: Optional[str] = Field(None, max_length=2000)
 
 
-# --------------------------------------------------------------------------
-# patients and medical records
-# --------------------------------------------------------------------------
-@app.post("/api/patients", status_code=201, tags=["patients"])
-def create_patient_route(payload: PatientCreate) -> Dict[str, Any]:
-    return create_patient(payload.model_dump(exclude_none=True))
+class HistoryCreate(BaseModel):
+    condition: str = Field(..., min_length=1, max_length=500)
+    notes: Optional[str] = Field(None, max_length=5000)
 
 
-@app.get("/api/patients", tags=["patients"])
-def get_patients(limit: int = Query(100, ge=1, le=500)) -> Dict[str, Any]:
-    return {"patients": list_patients(limit)}
+class AdmissionCreate(BaseModel):
+    patient_id: str = Field(..., min_length=1, max_length=100)
+    run_id: Optional[str] = Field(None, max_length=100)
+    admitted_at: Optional[str] = None
+    discharged_at: Optional[str] = None
+    triage_level: Optional[int] = Field(None, ge=1, le=5)
+    chief_complaint: Optional[str] = Field(None, max_length=2000)
+    diagnosis: Optional[str] = Field(None, max_length=2000)
+    treatment: Optional[str] = Field(None, max_length=5000)
+    outcome: Optional[str] = Field(None, max_length=500)
+    wait_min: Optional[int] = Field(None, ge=0)
+    treatment_min: Optional[int] = Field(None, ge=0)
 
 
-@app.get("/api/patients/{patient_id}", tags=["patients"])
-def get_patient_route(patient_id: str) -> Dict[str, Any]:
-    patient = get_patient(patient_id)
-    if patient is None:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    return patient
+class DischargeUpdate(BaseModel):
+    outcome: Optional[str] = Field(None, max_length=500)
+    notes: Optional[str] = Field(None, max_length=5000)
 
 
-@app.post("/api/patients/{patient_id}/history", tags=["patients"])
-def add_history_route(
-    patient_id: str,
-    payload: HistoryCreate,
-) -> Dict[str, Any]:
-    if get_patient(patient_id) is None:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    return add_history(patient_id, payload.condition, payload.notes)
+class BenchmarkIn(BaseModel):
+    seed: int = Field(4207, ge=1, le=2_147_483_647)
+    load_pct: int = Field(100, ge=10, le=400)
+    policies: Optional[List[str]] = None
+    replications: int = Field(1, ge=1, le=25, description="Distinct seeds per policy")
+    capacity: Optional[CapacityIn] = None
+
+    @field_validator("policies")
+    @classmethod
+    def _policies(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return v
+        bad = [p for p in v if p not in POLICIES]
+        if bad:
+            raise ValueError(f"unknown policies: {', '.join(bad)}")
+        return v
 
 
-@app.post("/api/patients/{patient_id}/admissions", tags=["patients"])
-def add_admission_route(
-    patient_id: str,
-    payload: AdmissionCreate,
-) -> Dict[str, Any]:
-    if get_patient(patient_id) is None:
-        raise HTTPException(status_code=404, detail="Patient not found")
-    admission_data = payload.model_dump(exclude_none=True)
-    admission_data["patient_id"] = patient_id
-    try:
-        return add_admission(admission_data)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Patient not found")
+class DeltaIn(BaseModel):
+    resource: str
+    delta: int = Field(1, ge=-50, le=50)
+
+    @field_validator("resource")
+    @classmethod
+    def _res(cls, v: str) -> str:
+        if v not in RES_KEYS:
+            raise ValueError(f"resource must be one of {', '.join(RES_KEYS)}")
+        return v
 
 
-# --------------------------------------------------------------------------
-# runs
-# --------------------------------------------------------------------------
-@app.post("/api/runs", status_code=201, tags=["runs"])
-def create_run(payload: RunCreate) -> Dict[str, Any]:
-    """Create a simulation. It starts at minute zero and does not advance on its own."""
-    s = engine.Sim(
-        seed=payload.seed,
-        policy=payload.policy,
-        load_pct=payload.load_pct,
-        capacity=_capacity(payload),
-        horizon=payload.horizon_min,
-    )
-    h = store.create(s)
-    return {"run_id": h.run_id, **h.summary(), "snapshot": s.snapshot()}
+class WhatIfIn(BaseModel):
+    seed: int = Field(4207, ge=1, le=2_147_483_647)
+    load_pct: int = Field(100, ge=10, le=400)
+    policy: str = "medflow"
+    replications: int = Field(3, ge=1, le=15)
+    deltas: Optional[List[DeltaIn]] = None
+    capacity: Optional[CapacityIn] = None
+
+    @field_validator("policy")
+    @classmethod
+    def _policy(cls, v: str) -> str:
+        if v not in POLICIES:
+            raise ValueError(f"policy must be one of {', '.join(POLICIES)}")
+        return v
 
 
-@app.get("/api/runs", tags=["runs"])
-def list_runs() -> Dict[str, Any]:
-    return {"runs": store.list()}
+class RunSummary(BaseModel):
+    run_id: str
+    seed: int
+    policy: str
+    load_pct: int
+    t: int
+    clock: str
+    horizon_min: int
+    finished: bool
+    created_at: float
+    capacity: Dict[str, int] = Field(default_factory=lambda: dict(DEFAULT_CAPACITY))
 
 
-@app.get("/api/runs/{run_id}", tags=["runs"])
-def get_run(
-    run_id: str,
-    queue_limit: int = Query(25, ge=1, le=200),
-    log_limit: int = Query(40, ge=0, le=400),
-) -> Dict[str, Any]:
-    h = _handle(run_id)
-    with h.lock:
-        return {"run_id": run_id, "snapshot": h.sim.snapshot(queue_limit, log_limit)}
-
-
-@app.post("/api/runs/{run_id}/advance", tags=["runs"])
-async def advance(run_id: str, payload: AdvanceIn) -> Dict[str, Any]:
-    """Step the clock forward. Returns the state after the last minute run."""
-    h = _handle(run_id)
-
-    def work() -> Dict[str, Any]:
-        with h.lock:
-            ran = h.sim.advance(payload.minutes)
-            return {"run_id": run_id, "minutes_advanced": ran,
-                    "snapshot": h.sim.snapshot()}
-
-    return await run_in_threadpool(work)
-
-
-@app.post("/api/runs/{run_id}/surge", tags=["runs"])
-def surge(run_id: str, payload: SurgeIn) -> Dict[str, Any]:
-    """Inject a mass casualty incident at the current minute."""
-    h = _handle(run_id)
-    with h.lock:
-        h.sim.surge(payload.count)
-        return {"run_id": run_id, "injected": payload.count,
-                "snapshot": h.sim.snapshot()}
-
-
-@app.post("/api/runs/{run_id}/reset", tags=["runs"])
-def reset(run_id: str) -> Dict[str, Any]:
-    """Rewind to minute zero with the same configuration."""
-    h = _handle(run_id)
-    with h.lock:
-        old = h.sim
-        h.sim = engine.Sim(old.seed, old.policy, round(old.load * 100),
-                            old.capacity, old.horizon)
-        return {"run_id": run_id, "snapshot": h.sim.snapshot()}
-
-
-@app.delete("/api/runs/{run_id}", status_code=204, tags=["runs"])
-def delete_run(run_id: str) -> None:
-    if not store.delete(run_id):
-        raise HTTPException(status_code=404, detail=f"No run {run_id}")
-    return Response(status_code=204)
-
-
-@app.get("/api/runs/{run_id}/metrics", tags=["runs"])
-def metrics(run_id: str) -> Dict[str, Any]:
-    h = _handle(run_id)
-    with h.lock:
-        return {"run_id": run_id, "t": h.sim.t, "metrics": h.sim.metrics()}
-
-
-@app.get("/api/runs/{run_id}/patients.csv", response_class=PlainTextResponse, tags=["runs"])
-def patients_csv(run_id: str) -> PlainTextResponse:
-    """Patient-level export: one row per person who has left the department."""
-    h = _handle(run_id)
-    with h.lock:
-        body = h.sim.patients_csv()
-    return PlainTextResponse(
-        body,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="medflow-{run_id}.csv"'},
-    )
-
-
-# --------------------------------------------------------------------------
-# analysis
-# --------------------------------------------------------------------------
-@app.post("/api/benchmark", tags=["analysis"])
-async def benchmark(payload: BenchmarkIn) -> Dict[str, Any]:
-    """Run every policy over the same seeds and return a comparison table."""
-    return await run_in_threadpool(
-        engine.compare_policies,
-        payload.seed, payload.load_pct, payload.policies,
-        payload.replications, _capacity(payload),
-    )
-
-
-@app.post("/api/what-if", tags=["analysis"])
-async def what_if(payload: WhatIfIn) -> Dict[str, Any]:
-    """Price a staffing decision by adding one unit of each resource in turn."""
-    deltas: List[Dict[str, int]] | None = (
-        [d.model_dump() for d in payload.deltas] if payload.deltas else None
-    )
-    return await run_in_threadpool(
-        engine.what_if,
-        payload.seed, payload.load_pct, payload.policy,
-        deltas, payload.replications, _capacity(payload),
-    )
-
-
-# --------------------------------------------------------------------------
-# live feed
-# --------------------------------------------------------------------------
-@app.websocket("/ws/runs/{run_id}")
-async def live(
-    websocket: WebSocket,
-    run_id: str,
-    speed: int = Query(30, ge=1, le=600),
-    interval_ms: int = Query(100, ge=40, le=2000),
-) -> None:
-    """Stream snapshots while advancing a simulation."""
-    await websocket.accept()
-    h = store.get(run_id)
-    if h is None:
-        await websocket.send_json({"error": f"No run {run_id}"})
-        await websocket.close(code=1008)
-        return
-
-    running = True
-    paused = False
-
-    async def receiver() -> None:
-        nonlocal running, paused, speed
-        try:
-            while running:
-                msg = await websocket.receive_json()
-                action = msg.get("action")
-                if action == "pause":
-                    paused = True
-                elif action == "resume":
-                    paused = False
-                elif action == "speed":
-                    speed = max(1, min(600, int(msg.get("value", speed))))
-                elif action == "surge":
-                    with h.lock:
-                        h.sim.surge(int(msg.get("count", 8)))
-                elif action == "stop":
-                    running = False
-        except (WebSocketDisconnect, RuntimeError, ValueError):
-            running = False
-
-    task = asyncio.create_task(receiver())
-    try:
-        while running:
-            if not paused:
-                def work() -> Dict[str, Any]:
-                    with h.lock:
-                        h.sim.advance(speed)
-                        return h.sim.snapshot()
-
-                snap = await run_in_threadpool(work)
-                await websocket.send_json({"run_id": run_id, "snapshot": snap})
-                if snap["finished"]:
-                    await websocket.send_json({"run_id": run_id, "event": "finished"})
-                    break
-            await asyncio.sleep(interval_ms / 1000)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        running = False
-        task.cancel()
-        try:
-            await websocket.close()
-        except RuntimeError:
-            pass
+class Snapshot(BaseModel):
+    run_id: str
+    snapshot: Dict[str, Any]

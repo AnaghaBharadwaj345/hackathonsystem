@@ -1,136 +1,206 @@
-"""Request and response models for the MEDFLOW API."""
+"""SQLite persistence for patient demographics, medical history, and admissions."""
 from __future__ import annotations
 
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
-from .sim import DEFAULT_CAPACITY, HORIZON, POLICIES, RES_KEYS
+
+DB_PATH = Path(__file__).resolve().parent.parent / "medflow.db"
+_lock = threading.Lock()
 
 
-class CapacityIn(BaseModel):
-    icu: Optional[int] = Field(None, ge=0, le=200)
-    ward: Optional[int] = Field(None, ge=0, le=500)
-    or_: Optional[int] = Field(None, ge=0, le=100, alias="or")
-    doctor: Optional[int] = Field(None, ge=0, le=300)
-    nurse: Optional[int] = Field(None, ge=0, le=600)
-    amb: Optional[int] = Field(None, ge=0, le=100)
-    model_config = {"populate_by_name": True}
-
-    def to_dict(self) -> Dict[str, int]:
-        raw = self.model_dump(by_alias=True, exclude_none=True)
-        return {k: v for k, v in raw.items() if k in RES_KEYS}
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
 
 
-class RunCreate(BaseModel):
-    seed: int = Field(4207, ge=1, le=2_147_483_647)
-    policy: str = "medflow"
-    load_pct: int = Field(100, ge=10, le=400)
-    capacity: Optional[CapacityIn] = None
-    horizon_min: int = Field(HORIZON, ge=60, le=10080)
-
-    @field_validator("policy")
-    @classmethod
-    def _policy(cls, v: str) -> str:
-        if v not in POLICIES:
-            raise ValueError(f"policy must be one of {', '.join(POLICIES)}")
-        return v
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
-class AdvanceIn(BaseModel):
-    minutes: int = Field(60, ge=1, le=10080)
+def init_db() -> None:
+    with _lock, _connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS patients (
+                patient_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                date_of_birth TEXT,
+                sex TEXT,
+                phone TEXT,
+                allergies TEXT,
+                chronic_conditions TEXT,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS medical_history (
+                history_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id TEXT NOT NULL REFERENCES patients(patient_id) ON DELETE CASCADE,
+                condition TEXT NOT NULL,
+                notes TEXT,
+                recorded_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS admissions (
+                admission_id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL REFERENCES patients(patient_id) ON DELETE CASCADE,
+                run_id TEXT,
+                admitted_at TEXT NOT NULL,
+                discharged_at TEXT,
+                triage_level INTEGER,
+                chief_complaint TEXT,
+                diagnosis TEXT,
+                treatment TEXT,
+                outcome TEXT,
+                wait_min INTEGER,
+                treatment_min INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_admissions_patient ON admissions(patient_id);
+            CREATE INDEX IF NOT EXISTS idx_history_patient ON medical_history(patient_id);
+            """
+        )
 
 
-class SurgeIn(BaseModel):
-    count: int = Field(8, ge=1, le=60)
+def create_patient(data: Dict[str, Any]) -> Dict[str, Any]:
+    patient_id = data.get("patient_id") or uuid.uuid4().hex
+    with _lock, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO patients (
+                patient_id, name, date_of_birth, sex, phone, allergies,
+                chronic_conditions, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                patient_id,
+                data["name"],
+                data.get("date_of_birth"),
+                data.get("sex"),
+                data.get("phone"),
+                data.get("allergies"),
+                data.get("chronic_conditions"),
+                _now(),
+            ),
+        )
+    return get_patient(patient_id) or {}
 
 
-class PatientCreate(BaseModel):
-    patient_id: Optional[str] = Field(None, min_length=1, max_length=100)
-    name: str = Field(..., min_length=1, max_length=200)
-    date_of_birth: Optional[str] = Field(None, max_length=30)
-    sex: Optional[str] = Field(None, max_length=30)
-    phone: Optional[str] = Field(None, max_length=40)
-    allergies: Optional[str] = Field(None, max_length=2000)
-    chronic_conditions: Optional[str] = Field(None, max_length=2000)
+def get_patient(patient_id: str) -> Optional[Dict[str, Any]]:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM patients WHERE patient_id = ?",
+            (patient_id,),
+        ).fetchone()
+        if not row:
+            return None
+        patient = dict(row)
+        patient["medical_history"] = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM medical_history WHERE patient_id = ? ORDER BY recorded_at DESC",
+                (patient_id,),
+            ).fetchall()
+        ]
+        patient["admissions"] = [
+            dict(r)
+            for r in conn.execute(
+                "SELECT * FROM admissions WHERE patient_id = ? ORDER BY admitted_at DESC",
+                (patient_id,),
+            ).fetchall()
+        ]
+        return patient
 
 
-class HistoryCreate(BaseModel):
-    condition: str = Field(..., min_length=1, max_length=500)
-    notes: Optional[str] = Field(None, max_length=5000)
+def list_patients(limit: int = 100) -> List[Dict[str, Any]]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM patients ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
-class AdmissionCreate(BaseModel):
-    patient_id: str = Field(..., min_length=1, max_length=100)
-    run_id: Optional[str] = Field(None, max_length=100)
-    admitted_at: Optional[str] = None
-    discharged_at: Optional[str] = None
-    triage_level: Optional[int] = Field(None, ge=1, le=5)
-    chief_complaint: Optional[str] = Field(None, max_length=2000)
-    diagnosis: Optional[str] = Field(None, max_length=2000)
-    treatment: Optional[str] = Field(None, max_length=5000)
-    outcome: Optional[str] = Field(None, max_length=500)
-    wait_min: Optional[int] = Field(None, ge=0)
-    treatment_min: Optional[int] = Field(None, ge=0)
+def add_history(patient_id: str, condition: str, notes: Optional[str] = None) -> Dict[str, Any]:
+    with _lock, _connect() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM patients WHERE patient_id = ?",
+            (patient_id,),
+        ).fetchone():
+            raise KeyError(patient_id)
+        conn.execute(
+            "INSERT INTO medical_history(patient_id, condition, notes, recorded_at) VALUES (?, ?, ?, ?)",
+            (patient_id, condition, notes, _now()),
+        )
+    return get_patient(patient_id) or {}
 
 
-class BenchmarkIn(BaseModel):
-    seed: int = Field(4207, ge=1, le=2_147_483_647)
-    load_pct: int = Field(100, ge=10, le=400)
-    policies: Optional[List[str]] = None
-    replications: int = Field(1, ge=1, le=25)
-    capacity: Optional[CapacityIn] = None
-
-    @field_validator("policies")
-    @classmethod
-    def _policies(cls, v: Optional[List[str]]) -> Optional[List[str]]:
-        if v is None:
-            return v
-        bad = [p for p in v if p not in POLICIES]
-        if bad:
-            raise ValueError(f"unknown policies: {', '.join(bad)}")
-        return v
-
-
-class DeltaIn(BaseModel):
-    resource: str
-    delta: int = Field(1, ge=-50, le=50)
-
-    @field_validator("resource")
-    @classmethod
-    def _res(cls, v: str) -> str:
-        if v not in RES_KEYS:
-            raise ValueError(f"resource must be one of {', '.join(RES_KEYS)}")
-        return v
-
-
-class WhatIfIn(BaseModel):
-    seed: int = Field(4207, ge=1, le=2_147_483_647)
-    load_pct: int = Field(100, ge=10, le=400)
-    policy: str = "medflow"
-    replications: int = Field(3, ge=1, le=15)
-    deltas: Optional[List[DeltaIn]] = None
-    capacity: Optional[CapacityIn] = None
-
-    @field_validator("policy")
-    @classmethod
-    def _policy(cls, v: str) -> str:
-        if v not in POLICIES:
-            raise ValueError(f"policy must be one of {', '.join(POLICIES)}")
-        return v
+def add_admission(data: Dict[str, Any]) -> Dict[str, Any]:
+    admission_id = data.get("admission_id") or uuid.uuid4().hex
+    with _lock, _connect() as conn:
+        if not conn.execute(
+            "SELECT 1 FROM patients WHERE patient_id = ?",
+            (data["patient_id"],),
+        ).fetchone():
+            raise KeyError(data["patient_id"])
+        conn.execute(
+            """
+            INSERT INTO admissions (
+                admission_id, patient_id, run_id, admitted_at, discharged_at,
+                triage_level, chief_complaint, diagnosis, treatment, outcome,
+                wait_min, treatment_min
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                admission_id,
+                data["patient_id"],
+                data.get("run_id"),
+                data.get("admitted_at", _now()),
+                data.get("discharged_at"),
+                data.get("triage_level"),
+                data.get("chief_complaint"),
+                data.get("diagnosis"),
+                data.get("treatment"),
+                data.get("outcome"),
+                data.get("wait_min"),
+                data.get("treatment_min"),
+            ),
+        )
+    admission = conn.execute(
+        "SELECT * FROM admissions WHERE admission_id = ?",
+        (admission_id,),
+    ).fetchone()
+    return dict(admission) if admission else {}
 
 
-class RunSummary(BaseModel):
-    run_id: str
-    seed: int
-    policy: str
-    load_pct: int
-    t: int
-    clock: str
-    horizon_min: int
-    finished: bool
-    created_at: float
-    capacity: Dict[str, int] = Field(default_factory=lambda: dict(DEFAULT_CAPACITY))
+def discharge_admission(admission_id: str, outcome: Optional[str] = None, notes: Optional[str] = None) -> Dict[str, Any]:
+    with _lock, _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM admissions WHERE admission_id = ?",
+            (admission_id,),
+        ).fetchone()
+        if not row:
+            raise KeyError(admission_id)
+        conn.execute(
+            "UPDATE admissions SET discharged_at = ?, outcome = ?, diagnosis = COALESCE(?, diagnosis) WHERE admission_id = ?",
+            (_now(), outcome, notes, admission_id),
+        )
+        updated = conn.execute(
+            "SELECT * FROM admissions WHERE admission_id = ?",
+            (admission_id,),
+        ).fetchone()
+        return dict(updated) if updated else {}
 
 
-class Snapshot(BaseModel):
-    run_id: str
-    snapshot: Dict[str, Any]
+__all__ = [
+    "DB_PATH",
+    "init_db",
+    "create_patient",
+    "get_patient",
+    "list_patients",
+    "add_history",
+    "add_admission",
+    "discharge_admission",
+]
